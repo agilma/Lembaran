@@ -1,0 +1,15 @@
+
+> lembaran@0.1.0 dev
+> next dev
+
+▲ Next.js 16.3.8 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.0.2:3000
+✓ Ready in 661ms
+✓ Running next.config.ts took 52ms
+
+ HEAD / 200 in 3.2s (next.js: 2.9s, application-code: 294ms)
+ GET / 200 in 90ms (next.js: 10ms, application-code: 80ms)
+ GET /reading/sholawat-wahidiyah 200 in 1454ms (next.js: 667ms, generate-params: 687ms, application-code: 101ms)
+ GET / 200 in 75ms (next.js: 5ms, application-code: 70ms)
+ GET /reading/sholawat-wahidiyah 200 in 109ms (next.js: 4ms, generate-params: 13ms, application-code: 91ms)
