@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-arabic: var(--font-arabic), 'Amiri', 'Traditional Arabic', serif;
+}
+
+:root {
+  --background: #faf9f6;
+  --foreground: #1e293b;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+.font-arabic {
+  font-family: var(--font-arabic);
+  line-height: 2.2;
+}
