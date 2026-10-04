@@ -1,13 +1,20 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { Reading } from '@/types/reading';
-import { recordReadingCompletion } from '@/app/actions/reading-actions';
+import {
+  recordReadingCompletion,
+  getReadingProgress,
+  saveReadingProgress,
+  deleteReadingProgress,
+} from '@/app/actions/reading-actions';
 
 interface ReadingViewProps {
   reading: Reading;
 }
+
+const TRANSLATION_CHAR_LIMIT = 180;
 
 export function ReadingView({ reading }: ReadingViewProps) {
   const sections = reading.sections || [];
@@ -16,7 +23,137 @@ export function ReadingView({ reading }: ReadingViewProps) {
     new Array(sections.length).fill(0)
   );
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
+  const [isTranslationExpanded, setIsTranslationExpanded] = useState<boolean>(false);
+  const [isProgressLoaded, setIsProgressLoaded] = useState<boolean>(false);
   const readerRef = useRef<HTMLDivElement>(null);
+
+  // Load initial saved progress from server (Supabase) or guest fallback (localStorage)
+  useEffect(() => {
+    let isSubscribed = true;
+
+    async function loadProgress() {
+      if (sections.length === 0) {
+        setIsProgressLoaded(true);
+        return;
+      }
+
+      const storageKey = `lembaran_progress_${reading.slug}`;
+
+      try {
+        // Attempt to fetch saved progress from server (authenticated user)
+        const res = await getReadingProgress(reading.slug);
+
+        if (isSubscribed && res.success && res.data) {
+          const { activeIndex: savedIndex, counts: savedCounts } = res.data;
+          let validIndex = 0;
+          if (
+            typeof savedIndex === 'number' &&
+            savedIndex >= 0 &&
+            savedIndex < sections.length
+          ) {
+            validIndex = savedIndex;
+          }
+
+          let validCounts = new Array(sections.length).fill(0);
+          if (
+            Array.isArray(savedCounts) &&
+            savedCounts.length === sections.length
+          ) {
+            validCounts = savedCounts.map((c) => (typeof c === 'number' ? c : 0));
+          }
+
+          setActiveIndex(validIndex);
+          setCounts(validCounts);
+          setIsProgressLoaded(true);
+          return;
+        }
+
+        // Fallback for guest or when no server progress exists
+        const localDataString = localStorage.getItem(storageKey);
+        if (isSubscribed && localDataString) {
+          try {
+            const parsed = JSON.parse(localDataString);
+            if (parsed && typeof parsed === 'object') {
+              const savedIndex = parsed.activeIndex;
+              const savedCounts = parsed.counts;
+
+              let validIndex = 0;
+              if (
+                typeof savedIndex === 'number' &&
+                savedIndex >= 0 &&
+                savedIndex < sections.length
+              ) {
+                validIndex = savedIndex;
+              }
+
+              let validCounts = new Array(sections.length).fill(0);
+              if (
+                Array.isArray(savedCounts) &&
+                savedCounts.length === sections.length
+              ) {
+                validCounts = savedCounts.map((c) => (typeof c === 'number' ? c : 0));
+              }
+
+              setActiveIndex(validIndex);
+              setCounts(validCounts);
+            }
+          } catch (e) {
+            console.error('Failed to parse local reading progress:', e);
+          }
+        }
+      } catch (err) {
+        console.error('Error loading reading progress:', err);
+      } finally {
+        if (isSubscribed) {
+          setIsProgressLoaded(true);
+        }
+      }
+    }
+
+    loadProgress();
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [reading.slug, sections.length]);
+
+  // Reset translation collapse state whenever section changes
+  useEffect(() => {
+    setIsTranslationExpanded(false);
+  }, [activeIndex]);
+
+  // Auto-save progress on activeIndex or counts update
+  const persistProgress = useCallback(
+    (newIndex: number, newCounts: number[]) => {
+      if (!isProgressLoaded || isCompleted || sections.length === 0) return;
+
+      const storageKey = `lembaran_progress_${reading.slug}`;
+
+      // Save locally (for guest and fast local state)
+      try {
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            activeIndex: newIndex,
+            counts: newCounts,
+            updatedAt: new Date().toISOString(),
+          })
+        );
+      } catch (e) {
+        console.error('Failed to write to localStorage:', e);
+      }
+
+      // Save to Supabase (background fire-and-forget for logged-in user)
+      saveReadingProgress({
+        readingSlug: reading.slug,
+        activeIndex: newIndex,
+        counts: newCounts,
+      }).catch((err) => {
+        console.error('Background progress save error:', err);
+      });
+    },
+    [isProgressLoaded, isCompleted, sections.length, reading.slug]
+  );
 
   const currentSection = sections[activeIndex];
   const hasCounter =
@@ -29,41 +166,47 @@ export function ReadingView({ reading }: ReadingViewProps) {
     ? Math.min(100, Math.round((currentCount / targetCount) * 100))
     : 0;
 
+  const translationText = currentSection?.translation || '';
+  const isLongTranslation = translationText.length > TRANSLATION_CHAR_LIMIT;
+
   const handleIncrement = () => {
-    setCounts((prev) => {
-      const updated = [...prev];
-      updated[activeIndex] = (updated[activeIndex] || 0) + 1;
-      return updated;
-    });
+    const updatedCounts = [...counts];
+    updatedCounts[activeIndex] = (updatedCounts[activeIndex] || 0) + 1;
+    setCounts(updatedCounts);
+    persistProgress(activeIndex, updatedCounts);
   };
 
   const handleResetSection = () => {
-    setCounts((prev) => {
-      const updated = [...prev];
-      updated[activeIndex] = 0;
-      return updated;
-    });
+    const updatedCounts = [...counts];
+    updatedCounts[activeIndex] = 0;
+    setCounts(updatedCounts);
+    persistProgress(activeIndex, updatedCounts);
   };
 
   const handlePrev = () => {
     if (activeIndex > 0) {
-      setActiveIndex((prev) => prev - 1);
+      const nextIndex = activeIndex - 1;
+      setActiveIndex(nextIndex);
+      persistProgress(nextIndex, counts);
     }
   };
 
   const handleNext = () => {
     if (activeIndex < sections.length - 1) {
-      setActiveIndex((prev) => prev + 1);
+      const nextIndex = activeIndex + 1;
+      setActiveIndex(nextIndex);
+      persistProgress(nextIndex, counts);
     } else {
+      // Completed reading!
       setIsCompleted(true);
-      // Calculate total count and total target across all sections (optional details)
+
       const totalCount = counts.reduce((sum, val) => sum + val, 0);
       const totalTarget = sections.reduce(
         (sum, sec) => sum + (sec.repeatCount || 0),
         0
       );
 
-      // Record reading completion in background (fire-and-forget, non-blocking)
+      // 1. Record completion history
       recordReadingCompletion({
         readingSlug: reading.slug,
         count: totalCount > 0 ? totalCount : null,
@@ -71,13 +214,31 @@ export function ReadingView({ reading }: ReadingViewProps) {
       }).catch((err) => {
         console.error('Non-blocking persistence error:', err);
       });
+
+      // 2. Clear saved progress in Supabase and localStorage
+      deleteReadingProgress(reading.slug).catch((err) => {
+        console.error('Failed to delete server progress:', err);
+      });
+      try {
+        localStorage.removeItem(`lembaran_progress_${reading.slug}`);
+      } catch (e) {
+        console.error('Failed to clear local progress:', e);
+      }
     }
   };
 
   const handleResetAll = () => {
-    setCounts(new Array(sections.length).fill(0));
+    const zeroCounts = new Array(sections.length).fill(0);
+    setCounts(zeroCounts);
     setActiveIndex(0);
     setIsCompleted(false);
+
+    try {
+      localStorage.removeItem(`lembaran_progress_${reading.slug}`);
+    } catch (e) {
+      console.error('Failed to clear local progress on reset:', e);
+    }
+    deleteReadingProgress(reading.slug).catch(() => {});
   };
 
   const scrollToReader = () => {
@@ -92,7 +253,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
       <div className="space-y-4">
         <Link
           href="/"
-          className="inline-flex items-center text-xs sm:text-sm font-medium text-slate-500 hover:text-emerald-800 transition-colors group"
+          className="inline-flex items-center text-xs sm:text-sm font-medium text-slate-500 hover:text-emerald-800 dark:text-slate-400 dark:hover:text-emerald-400 transition-colors group"
         >
           <svg
             className="w-4 h-4 mr-1 transition-transform group-hover:-translate-x-0.5"
@@ -111,24 +272,24 @@ export function ReadingView({ reading }: ReadingViewProps) {
           Kembali ke Daftar Bacaan
         </Link>
 
-        <header className="border-b border-slate-200/80 pb-6 space-y-2">
+        <header className="border-b border-slate-200/80 dark:border-slate-800 pb-6 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             {reading.category && (
-              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100/80 text-emerald-800">
+              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100/80 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200/50 dark:border-emerald-800/50">
                 {reading.category}
               </span>
             )}
             {reading.estimatedTime && (
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
                 • Estimasi: {reading.estimatedTime}
               </span>
             )}
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
             {reading.title}
           </h1>
           {reading.description && (
-            <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+            <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400 leading-relaxed">
               {reading.description}
             </p>
           )}
@@ -138,7 +299,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
               <button
                 type="button"
                 onClick={scrollToReader}
-                className="inline-flex items-center justify-center text-sm font-semibold text-white bg-emerald-800 hover:bg-emerald-900 px-5 py-2.5 rounded-lg transition-colors shadow-xs cursor-pointer active:scale-[0.99]"
+                className="inline-flex items-center justify-center text-sm font-semibold text-white bg-emerald-800 hover:bg-emerald-900 dark:bg-emerald-700 dark:hover:bg-emerald-600 px-5 py-2.5 rounded-lg transition-colors shadow-xs cursor-pointer active:scale-[0.99]"
               >
                 Mulai Membaca
               </button>
@@ -150,22 +311,22 @@ export function ReadingView({ reading }: ReadingViewProps) {
       {/* Completion View */}
       {isCompleted ? (
         <section
-          className="p-8 sm:p-10 rounded-2xl bg-white border border-emerald-200 shadow-xs text-center space-y-6"
+          className="p-8 sm:p-10 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-900/60 shadow-xs text-center space-y-6"
           aria-live="polite"
         >
-          <div className="w-16 h-16 bg-emerald-100 text-emerald-800 rounded-full flex items-center justify-center mx-auto text-2xl font-bold">
+          <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 rounded-full flex items-center justify-center mx-auto text-2xl font-bold border border-emerald-200/50 dark:border-emerald-800/50">
             ✓
           </div>
           <div className="space-y-2">
-            <span className="text-xs font-semibold tracking-wider uppercase text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full">
+            <span className="text-xs font-semibold tracking-wider uppercase text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-3 py-1 rounded-full border border-emerald-200/50 dark:border-emerald-800/50">
               Selesai
             </span>
-            <h2 className="text-2xl font-bold text-slate-900 pt-2">
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100 pt-2">
               Bacaan telah selesai.
             </h2>
-            <p className="text-sm text-slate-600 max-w-md mx-auto">
+            <p className="text-sm text-slate-600 dark:text-slate-400 max-w-md mx-auto">
               Alhamdulillah, Anda telah menyelesaikan seluruh bagian dari{' '}
-              <span className="font-medium text-slate-800">
+              <span className="font-medium text-slate-800 dark:text-slate-200">
                 {reading.title}
               </span>
               .
@@ -176,7 +337,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
             <button
               type="button"
               onClick={handleResetAll}
-              className="w-full sm:w-auto inline-flex items-center justify-center text-sm font-semibold text-white bg-emerald-800 hover:bg-emerald-900 px-6 py-3 rounded-xl transition-colors shadow-xs cursor-pointer active:scale-[0.99]"
+              className="w-full sm:w-auto inline-flex items-center justify-center text-sm font-semibold text-white bg-emerald-800 hover:bg-emerald-900 dark:bg-emerald-700 dark:hover:bg-emerald-600 px-6 py-3 rounded-xl transition-colors shadow-xs cursor-pointer active:scale-[0.99]"
             >
               <svg
                 className="w-4 h-4 mr-2"
@@ -196,7 +357,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
             </button>
             <Link
               href="/"
-              className="w-full sm:w-auto inline-flex items-center justify-center text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 px-6 py-3 rounded-xl transition-colors"
+              className="w-full sm:w-auto inline-flex items-center justify-center text-sm font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200/80 dark:border-slate-700 px-6 py-3 rounded-xl transition-colors"
             >
               Ke Halaman Utama
             </Link>
@@ -207,9 +368,9 @@ export function ReadingView({ reading }: ReadingViewProps) {
         <div ref={readerRef} className="space-y-6 scroll-mt-6">
           {/* Section Progress Bar */}
           {sections.length > 1 && (
-            <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-2xs space-y-3">
-              <div className="flex items-center justify-between text-xs font-medium text-slate-600">
-                <span className="text-emerald-800 font-semibold">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
+              <div className="flex items-center justify-between text-xs font-medium text-slate-600 dark:text-slate-400">
+                <span className="text-emerald-800 dark:text-emerald-400 font-semibold">
                   Bagian {activeIndex + 1} dari {sections.length}
                 </span>
                 <span>
@@ -227,14 +388,17 @@ export function ReadingView({ reading }: ReadingViewProps) {
                     <button
                       key={sec.id}
                       type="button"
-                      onClick={() => setActiveIndex(idx)}
+                      onClick={() => {
+                        setActiveIndex(idx);
+                        persistProgress(idx, counts);
+                      }}
                       aria-label={`Pindah ke bagian ${idx + 1}`}
-                      className={`h-2 flex-1 rounded-full transition-all ${
+                      className={`h-2 flex-1 rounded-full transition-all cursor-pointer ${
                         idx === activeIndex
-                          ? 'bg-emerald-800'
+                          ? 'bg-emerald-800 dark:bg-emerald-500'
                           : secReached
-                          ? 'bg-emerald-400'
-                          : 'bg-slate-200 hover:bg-slate-300'
+                          ? 'bg-emerald-400 dark:bg-emerald-700'
+                          : 'bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700'
                       }`}
                     />
                   );
@@ -244,17 +408,17 @@ export function ReadingView({ reading }: ReadingViewProps) {
           )}
 
           {/* Active Section Card */}
-          <div className="p-6 sm:p-8 rounded-2xl bg-white border border-slate-200/90 shadow-2xs space-y-6">
+          <div className="p-6 sm:p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xs space-y-6">
             {/* Title & Badge */}
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4 flex-wrap gap-2">
-              <span className="text-xs font-semibold text-emerald-900 bg-emerald-50 border border-emerald-200/60 px-3 py-1 rounded-lg">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-4 flex-wrap gap-2">
+              <span className="text-xs font-semibold text-emerald-900 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200/60 dark:border-emerald-800/60 px-3 py-1 rounded-lg">
                 {currentSection.title
                   ? `Bagian ${activeIndex + 1}: ${currentSection.title}`
                   : `Bagian ${activeIndex + 1}`}
               </span>
 
               {hasCounter && isTargetReached && (
-                <span className="inline-flex items-center text-xs font-semibold text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-lg">
+                <span className="inline-flex items-center text-xs font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-200/50 dark:border-emerald-800/50">
                   <svg
                     className="w-3.5 h-3.5 mr-1"
                     fill="currentColor"
@@ -274,8 +438,8 @@ export function ReadingView({ reading }: ReadingViewProps) {
 
             {/* Instruction */}
             {currentSection.instruction && (
-              <div className="text-xs text-slate-600 bg-amber-50/70 border border-amber-200/60 p-3 rounded-lg flex items-start gap-2">
-                <span className="font-semibold text-amber-800 shrink-0">
+              <div className="text-xs text-slate-600 dark:text-amber-200/90 bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-800/60 p-3 rounded-lg flex items-start gap-2">
+                <span className="font-semibold text-amber-800 dark:text-amber-300 shrink-0">
                   Petunjuk:
                 </span>
                 <span>{currentSection.instruction}</span>
@@ -285,7 +449,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
             {/* Arabic Text */}
             {currentSection.arabic && (
               <div
-                className="text-right py-4 font-arabic text-2xl sm:text-3xl text-slate-900 leading-loose sm:leading-loose tracking-wide break-words"
+                className="text-right py-4 font-arabic text-2xl sm:text-3xl text-slate-900 dark:text-amber-100 leading-loose sm:leading-loose tracking-wide break-words"
                 dir="rtl"
                 lang="ar"
               >
@@ -296,40 +460,94 @@ export function ReadingView({ reading }: ReadingViewProps) {
             {/* Transliteration */}
             {currentSection.transliteration && (
               <div className="space-y-1">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                <p className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
                   Transliterasi
                 </p>
-                <p className="text-sm sm:text-base text-slate-700 italic leading-relaxed bg-slate-50/70 p-3.5 rounded-lg border border-slate-200/60">
+                <p className="text-sm sm:text-base text-slate-700 dark:text-slate-300 italic leading-relaxed bg-slate-50/70 dark:bg-slate-800/70 p-3.5 rounded-lg border border-slate-200/60 dark:border-slate-700/60">
                   {currentSection.transliteration}
                 </p>
               </div>
             )}
 
-            {/* Translation */}
+            {/* Translation (Collapsible for long text) */}
             {currentSection.translation && (
               <div className="space-y-1 pt-1">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                <p className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
                   Terjemahan
                 </p>
-                <p className="text-sm sm:text-base text-slate-700 leading-relaxed">
-                  &ldquo;{currentSection.translation}&rdquo;
-                </p>
+                <div className="text-sm sm:text-base text-slate-700 dark:text-slate-300 leading-relaxed">
+                  <p>
+                    &ldquo;
+                    {isLongTranslation && !isTranslationExpanded
+                      ? `${translationText.slice(0, TRANSLATION_CHAR_LIMIT).trim()}...`
+                      : translationText}
+                    &rdquo;
+                  </p>
+                  {isLongTranslation && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setIsTranslationExpanded(!isTranslationExpanded)
+                      }
+                      aria-expanded={isTranslationExpanded}
+                      className="mt-1.5 inline-flex items-center text-xs font-semibold text-emerald-800 dark:text-emerald-400 hover:underline cursor-pointer focus:outline-hidden"
+                    >
+                      {isTranslationExpanded ? (
+                        <>
+                          <span>Sembunyikan</span>
+                          <svg
+                            className="w-3.5 h-3.5 ml-1"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                            aria-hidden="true"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M5 15l7-7 7 7"
+                            />
+                          </svg>
+                        </>
+                      ) : (
+                        <>
+                          <span>Baca selengkapnya</span>
+                          <svg
+                            className="w-3.5 h-3.5 ml-1"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                            aria-hidden="true"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M19 9l-7 7-7-7"
+                            />
+                          </svg>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
             {/* Counter Section (OPTIONAL: rendered ONLY if repeatCount is set) */}
             {hasCounter && (
-              <div className="pt-6 border-t border-slate-100 space-y-4">
+              <div className="pt-6 border-t border-slate-100 dark:border-slate-800 space-y-4">
                 <div className="flex items-end justify-between">
                   <div className="space-y-1">
-                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                       Hitungan
                     </span>
                     <div className="flex items-baseline gap-2">
-                      <span className="text-3xl sm:text-4xl font-extrabold text-slate-900 font-mono tracking-tight">
+                      <span className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-slate-100 font-mono tracking-tight">
                         {currentCount}
                       </span>
-                      <span className="text-base sm:text-lg font-medium text-slate-400 font-mono">
+                      <span className="text-base sm:text-lg font-medium text-slate-400 dark:text-slate-500 font-mono">
                         / {targetCount}
                       </span>
                     </div>
@@ -341,8 +559,8 @@ export function ReadingView({ reading }: ReadingViewProps) {
                     disabled={currentCount === 0}
                     className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-colors ${
                       currentCount === 0
-                        ? 'text-slate-300 cursor-not-allowed'
-                        : 'text-slate-500 hover:text-red-700 hover:bg-red-50 cursor-pointer'
+                        ? 'text-slate-300 dark:text-slate-600 cursor-not-allowed'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-red-700 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer'
                     }`}
                     aria-label="Reset hitungan bagian ini"
                   >
@@ -351,10 +569,12 @@ export function ReadingView({ reading }: ReadingViewProps) {
                 </div>
 
                 {/* Progress Bar */}
-                <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                <div className="w-full bg-slate-100 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden">
                   <div
                     className={`h-full transition-all duration-300 ${
-                      isTargetReached ? 'bg-emerald-600' : 'bg-emerald-800'
+                      isTargetReached
+                        ? 'bg-emerald-600 dark:bg-emerald-500'
+                        : 'bg-emerald-800 dark:bg-emerald-600'
                     }`}
                     style={{ width: `${progressPercent}%` }}
                     role="progressbar"
@@ -369,7 +589,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
                 <button
                   type="button"
                   onClick={handleIncrement}
-                  className="w-full min-h-[60px] py-3.5 px-4 bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 text-white rounded-xl font-bold shadow-xs transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer select-none active:scale-[0.98] touch-manipulation focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
+                  className="w-full min-h-[60px] py-3.5 px-4 bg-emerald-800 dark:bg-emerald-700 hover:bg-emerald-900 dark:hover:bg-emerald-600 active:bg-emerald-950 text-white rounded-xl font-bold shadow-xs transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer select-none active:scale-[0.98] touch-manipulation focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
                   aria-label={`Tambah hitungan, saat ini ${currentCount} dari ${targetCount}`}
                 >
                   <svg
@@ -400,8 +620,8 @@ export function ReadingView({ reading }: ReadingViewProps) {
               disabled={activeIndex === 0}
               className={`flex-1 inline-flex items-center justify-center py-3.5 px-4 rounded-xl text-sm font-semibold transition-all ${
                 activeIndex === 0
-                  ? 'bg-slate-100 text-slate-300 cursor-not-allowed border border-slate-200/50'
-                  : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200/80 shadow-2xs cursor-pointer active:scale-[0.99]'
+                  ? 'bg-slate-100 dark:bg-slate-800/50 text-slate-300 dark:text-slate-600 cursor-not-allowed border border-slate-200/50 dark:border-slate-800'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200/80 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-[0.99]'
               }`}
               aria-label="Ke bagian sebelumnya"
             >
@@ -425,7 +645,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
             <button
               type="button"
               onClick={handleNext}
-              className="flex-1 inline-flex items-center justify-center py-3.5 px-4 rounded-xl text-sm font-semibold bg-emerald-800 text-white hover:bg-emerald-900 shadow-2xs cursor-pointer active:scale-[0.99] transition-all"
+              className="flex-1 inline-flex items-center justify-center py-3.5 px-4 rounded-xl text-sm font-semibold bg-emerald-800 dark:bg-emerald-700 text-white hover:bg-emerald-900 dark:hover:bg-emerald-600 shadow-2xs cursor-pointer active:scale-[0.99] transition-all"
               aria-label={
                 activeIndex === sections.length - 1
                   ? 'Selesaikan bacaan'
@@ -451,7 +671,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
           </div>
         </div>
       ) : reading.content ? (
-        <div className="prose prose-slate max-w-none text-slate-700 leading-relaxed bg-white p-6 rounded-xl border border-slate-200/80">
+        <div className="prose dark:prose-invert prose-slate max-w-none text-slate-700 dark:text-slate-300 leading-relaxed bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200/80 dark:border-slate-800">
           <p>{reading.content}</p>
         </div>
       ) : null}

@@ -36,19 +36,24 @@ export const viewport: Viewport = {
   maximumScale: 1,
 };
 
+const themeScript = `(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark')}else{document.documentElement.classList.remove('dark')}}catch(e){}})()`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id" className={`${inter.variable} ${amiri.variable}`}>
-      <body className="min-h-screen bg-[#faf9f6] text-slate-800 font-sans antialiased flex flex-col selection:bg-emerald-100 selection:text-emerald-900">
+    <html lang="id" className={`${inter.variable} ${amiri.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
+      <body className="min-h-screen bg-[#faf9f6] dark:bg-[#0b0f17] text-slate-800 dark:text-slate-100 font-sans antialiased flex flex-col selection:bg-emerald-100 dark:selection:bg-emerald-900 selection:text-emerald-900 dark:selection:text-emerald-100">
         <Header />
         <main className="flex-1 max-w-3xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-10">
           {children}
         </main>
-        <footer className="border-t border-slate-200/60 py-6 text-center text-xs text-slate-500">
+        <footer className="border-t border-slate-200/60 dark:border-slate-800 py-6 text-center text-xs text-slate-500 dark:text-slate-400">
           <div className="max-w-3xl mx-auto px-4">
             <p>© {new Date().getFullYear()} Lembaran. Wadah tenang membaca & mengamalkan bacaan.</p>
           </div>
