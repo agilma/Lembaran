@@ -3,15 +3,13 @@ import { Role, User } from "@/types/user";
 
 /**
  * Returns the Administrator user if configured via environment variables.
- * Credential configuration requires ADMIN_EMAIL and ADMIN_PASSWORD_HASH.
- * Standard fallback for local development if ADMIN_EMAIL is set but password hash is omitted:
- * fallback password hash for test mode if explicitly configured in non-production.
+ * Requires both ADMIN_EMAIL and ADMIN_PASSWORD_HASH to be defined and non-empty.
  */
 export function getAdminUser(): User | null {
   const adminEmail = process.env.ADMIN_EMAIL?.trim();
   const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH?.trim();
 
-  if (!adminEmail) {
+  if (!adminEmail || !adminPasswordHash) {
     return null;
   }
 
@@ -20,7 +18,7 @@ export function getAdminUser(): User | null {
     email: adminEmail.toLowerCase(),
     name: process.env.ADMIN_NAME?.trim() || "Administrator",
     role: Role.ADMIN,
-    passwordHash: adminPasswordHash || "",
+    passwordHash: adminPasswordHash,
   };
 }
 
