@@ -115,7 +115,7 @@ export const readingsData: Reading[] = [
       {
         id: 'sw-14',
         title: 'Doa Setelah Istighroq',
-        arabic: 'بسم الله الرحمن الرحيم اللهم بحق اسمك الأعظم وبجاه سيدنا محمد صلى الله عليه وسلم وببركة غوث هذا الزمان واعوانه وسائر أوليآئك ياالله, ياالله, ياالله رضى الله تعالى عنهم',
+        arabic: 'ثم الإستغراق ساعة بقدر الطاقة وقراءة الفاتحة مرة ثم الدعاء : بسم الله الرحمن الرحيم اللهم بحق اسمك الأعظم وبجاه سيدنا محمد صلى الله عليه وسلم وببركة غوث هذا الزمان واعوانه وسائر أوليآئك ياالله, ياالله, ياالله رضى الله تعالى عنهم',
         transliteration: "BISMILLAAHIR ROHMAANIR ROHIIM,\nALLOOHUMMA BIHAQQISMIKAL A'DHOM WABIJAAHI SAYYIDINAA MUHAMMADIN SHOLLALLOHU ‘ALAIHI WASALLAM WABIBARAKATI GHOUTSI HADZAZ-ZAMAAN WA A'WAANIHI WA SAAIRI AULIYAAIKA YAA ALLOH, YAA ALLOH, YAA ALLOH, RODLIYALLOOHU TA'AALA'ANHUM.",
         translation: 'Dengan Nama Alloh Yang Maha Pengasih lagi Maha Penyayang Yaa Alloh, dengan hak kebesaran Asma-MU, dan dengan kemuliaan serta keagungan Kanjeng Nabi Mahammad Sollallohu ‘Alaihi WaSallam, dan dengan Barokahnya Ghoutsu Hadhaz Zaman wa A’wanihi serta segenap Auliya’ Kekasih-MU Yaa Alloh, Yaa Alloh Rodiyallohu Ta’ala Anhum',
         repeatCount: 3
