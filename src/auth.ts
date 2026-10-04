@@ -3,6 +3,12 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { findUserByEmail, verifyPassword } from "@/lib/users";
 import { Role } from "@/types/user";
 
+if (!process.env.AUTH_SECRET) {
+  throw new Error(
+    "Missing AUTH_SECRET environment variable. Authentication requires AUTH_SECRET to be defined."
+  );
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   secret: process.env.AUTH_SECRET,
   providers: [
@@ -43,14 +49,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
-        token.role = (user as { role?: Role }).role || Role.ADMIN;
+        const userRole = (user as { role?: Role }).role;
+        if (userRole) {
+          token.role = userRole;
+        }
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.id as string;
-        session.user.role = (token.role as Role) || Role.ADMIN;
+        if (token.role) {
+          session.user.role = token.role as Role;
+        }
       }
       return session;
     },

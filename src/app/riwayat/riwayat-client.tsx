@@ -10,6 +10,8 @@ import {
 
 interface RiwayatClientProps {
   isAuthenticated: boolean;
+  isError?: boolean;
+  errorMessage?: string;
   completions: CompletionRecordItem[];
   summaries: ReadingSummaryItem[];
   dateSummaries: DateSummaryItem[];
@@ -17,6 +19,8 @@ interface RiwayatClientProps {
 
 export default function RiwayatClient({
   isAuthenticated,
+  isError,
+  errorMessage,
   completions,
   summaries,
   dateSummaries,
@@ -56,7 +60,7 @@ export default function RiwayatClient({
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
             Riwayat Bacaan
           </h1>
-          {!isEmpty && (
+          {!isEmpty && !isError && (
             <span className="text-xs font-semibold px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200/50 dark:border-emerald-800/50">
               Total: {completions.length} Selesai
             </span>
@@ -67,7 +71,21 @@ export default function RiwayatClient({
         </p>
       </header>
 
-      {isEmpty ? (
+      {isError ? (
+        <div className="p-6 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-center space-y-3">
+          <div className="w-12 h-12 bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300 rounded-full flex items-center justify-center mx-auto text-xl font-bold">
+            ⚠️
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-base font-bold text-rose-900 dark:text-rose-200">
+              Gagal Memuat Riwayat
+            </h2>
+            <p className="text-xs text-rose-700 dark:text-rose-300 max-w-sm mx-auto">
+              {errorMessage || "Terjadi kesalahan database saat memuat riwayat. Silakan coba beberapa saat lagi."}
+            </p>
+          </div>
+        </div>
+      ) : isEmpty ? (
         <div className="p-8 sm:p-12 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xs text-center space-y-5">
           <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 rounded-full flex items-center justify-center mx-auto text-2xl">
             📜

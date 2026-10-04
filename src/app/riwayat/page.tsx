@@ -14,6 +14,8 @@ export default async function RiwayatPage() {
   return (
     <RiwayatClient
       isAuthenticated={!!user}
+      isError={!historyRes.success}
+      errorMessage={historyRes.message}
       completions={historyRes.completions || []}
       summaries={historyRes.summaries || []}
       dateSummaries={historyRes.dateSummaries || []}
