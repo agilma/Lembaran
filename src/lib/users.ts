@@ -1,41 +1,41 @@
 import bcrypt from "bcryptjs";
 import { Role, User } from "@/types/user";
 
-// Pre-hashed passwords for test accounts ("password123")
-const DEFAULT_PASSWORD_HASH = bcrypt.hashSync("password123", 10);
+/**
+ * Returns the Administrator user if configured via environment variables.
+ * Requires both ADMIN_EMAIL and ADMIN_PASSWORD_HASH to be defined and non-empty.
+ */
+export function getAdminUser(): User | null {
+  const adminEmail = process.env.ADMIN_EMAIL?.trim();
+  const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH?.trim();
 
-export const MOCK_USERS: User[] = [
-  {
-    id: "user-viewer-1",
-    email: "viewer@lembaran.app",
-    name: "Pembaca Lembaran",
-    role: Role.VIEWER,
-    passwordHash: DEFAULT_PASSWORD_HASH,
-  },
-  {
-    id: "user-editor-1",
-    email: "editor@lembaran.app",
-    name: "Editor Bacaan",
-    role: Role.EDITOR,
-    passwordHash: DEFAULT_PASSWORD_HASH,
-  },
-  {
-    id: "user-admin-1",
-    email: "admin@lembaran.app",
-    name: "Pengelola Sistem",
+  if (!adminEmail || !adminPasswordHash) {
+    return null;
+  }
+
+  return {
+    id: "admin-user",
+    email: adminEmail.toLowerCase(),
+    name: process.env.ADMIN_NAME?.trim() || "Administrator",
     role: Role.ADMIN,
-    passwordHash: DEFAULT_PASSWORD_HASH,
-  },
-];
+    passwordHash: adminPasswordHash,
+  };
+}
 
 export function findUserByEmail(email: string): User | undefined {
-  return MOCK_USERS.find(
-    (user) => user.email.toLowerCase() === email.toLowerCase()
-  );
+  const admin = getAdminUser();
+  if (admin && admin.email === email.trim().toLowerCase()) {
+    return admin;
+  }
+  return undefined;
 }
 
 export function findUserById(id: string): User | undefined {
-  return MOCK_USERS.find((user) => user.id === id);
+  const admin = getAdminUser();
+  if (admin && admin.id === id) {
+    return admin;
+  }
+  return undefined;
 }
 
 export async function verifyPassword(
@@ -43,5 +43,10 @@ export async function verifyPassword(
   hashedPassword?: string
 ): Promise<boolean> {
   if (!hashedPassword) return false;
-  return bcrypt.compare(plainPassword, hashedPassword);
+  try {
+    return await bcrypt.compare(plainPassword, hashedPassword);
+  } catch (err) {
+    console.error("Error verifying password hash:", err);
+    return false;
+  }
 }
