@@ -2,6 +2,8 @@
 
 import { getCurrentUser } from "@/lib/auth-utils";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { readingsData } from "@/data/readings";
+import { formatInJakartaTimezone } from "@/lib/date-utils";
 
 export interface RecordCompletionParams {
   readingSlug: string;
@@ -37,6 +39,39 @@ export interface SaveProgressResult {
   success: boolean;
   message: string;
   savedLocallyOrUnauthenticated?: boolean;
+}
+
+export interface CompletionRecordItem {
+  id: string;
+  readingSlug: string;
+  readingTitle: string;
+  count: number | null;
+  target: number | null;
+  completedAt: string;
+  formattedDate: string;
+  formattedTime: string;
+  fullFormatted: string;
+  isoDateKey: string;
+}
+
+export interface ReadingSummaryItem {
+  readingSlug: string;
+  readingTitle: string;
+  totalCompletions: number;
+}
+
+export interface DateSummaryItem {
+  isoDateKey: string;
+  dateString: string;
+  totalCompletions: number;
+}
+
+export interface GetReadingHistoryResult {
+  success: boolean;
+  completions: CompletionRecordItem[];
+  summaries: ReadingSummaryItem[];
+  dateSummaries: DateSummaryItem[];
+  message?: string;
 }
 
 export async function recordReadingCompletion(
@@ -242,6 +277,140 @@ export async function deleteReadingProgress(
     return {
       success: false,
       message: "Terjadi kesalahan saat menghapus progress.",
+    };
+  }
+}
+
+export async function getReadingHistory(): Promise<GetReadingHistoryResult> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return {
+        success: true,
+        completions: [],
+        summaries: [],
+        dateSummaries: [],
+        message: "Pengguna belum terautentikasi.",
+      };
+    }
+
+    const supabase = getSupabaseServerClient();
+    if (!supabase) {
+      return {
+        success: true,
+        completions: [],
+        summaries: [],
+        dateSummaries: [],
+        message: "Supabase belum terkonfigurasi.",
+      };
+    }
+
+    const { data, error } = await supabase
+      .from("reading_completions")
+      .select("id, reading_slug, count, target, completed_at")
+      .eq("user_id", user.id)
+      .order("completed_at", { ascending: false });
+
+    if (error) {
+      console.error("Failed to fetch reading history from Supabase:", error);
+      return {
+        success: false,
+        completions: [],
+        summaries: [],
+        dateSummaries: [],
+        message: "Gagal memuat riwayat bacaan dari database.",
+      };
+    }
+
+    if (!data || data.length === 0) {
+      return {
+        success: true,
+        completions: [],
+        summaries: [],
+        dateSummaries: [],
+      };
+    }
+
+    // Title map helper
+    const titleMap = new Map<string, string>();
+    readingsData.forEach((r) => titleMap.set(r.slug, r.title));
+
+    const completions: CompletionRecordItem[] = data.map((item) => {
+      const readingTitle = titleMap.get(item.reading_slug) || item.reading_slug;
+      const formatted = formatInJakartaTimezone(item.completed_at);
+
+      return {
+        id: item.id,
+        readingSlug: item.reading_slug,
+        readingTitle,
+        count: item.count,
+        target: item.target,
+        completedAt: item.completed_at,
+        formattedDate: formatted.dateString,
+        formattedTime: formatted.timeString,
+        fullFormatted: formatted.fullFormatted,
+        isoDateKey: formatted.isoDateKey,
+      };
+    });
+
+    // Compute summary per reading
+    const readingSummaryMap = new Map<string, { readingTitle: string; count: number }>();
+    completions.forEach((c) => {
+      const existing = readingSummaryMap.get(c.readingSlug);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        readingSummaryMap.set(c.readingSlug, {
+          readingTitle: c.readingTitle,
+          count: 1,
+        });
+      }
+    });
+
+    const summaries: ReadingSummaryItem[] = Array.from(readingSummaryMap.entries()).map(
+      ([slug, val]) => ({
+        readingSlug: slug,
+        readingTitle: val.readingTitle,
+        totalCompletions: val.count,
+      })
+    );
+
+    // Compute date summary (for Calendar / Date View readiness)
+    const dateSummaryMap = new Map<string, { dateString: string; count: number }>();
+    completions.forEach((c) => {
+      const existing = dateSummaryMap.get(c.isoDateKey);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        dateSummaryMap.set(c.isoDateKey, {
+          dateString: c.formattedDate,
+          count: 1,
+        });
+      }
+    });
+
+    const dateSummaries: DateSummaryItem[] = Array.from(dateSummaryMap.entries()).map(
+      ([isoKey, val]) => ({
+        isoDateKey: isoKey,
+        dateString: val.dateString,
+        totalCompletions: val.count,
+      })
+    );
+
+    return {
+      success: true,
+      completions,
+      summaries,
+      dateSummaries,
+    };
+  } catch (err: unknown) {
+    console.error("Error in getReadingHistory server action:", err);
+    return {
+      success: false,
+      completions: [],
+      summaries: [],
+      dateSummaries: [],
+      message: "Terjadi kesalahan server saat memuat riwayat.",
     };
   }
 }

@@ -26,6 +26,12 @@ export default async function Header() {
             Beranda
           </Link>
           <Link
+            href="/riwayat"
+            className="hover:text-emerald-800 dark:hover:text-emerald-400 transition-colors py-1"
+          >
+            Riwayat
+          </Link>
+          <Link
             href="/login"
             className="hover:text-emerald-800 dark:hover:text-emerald-400 transition-colors py-1 flex items-center gap-1.5"
           >

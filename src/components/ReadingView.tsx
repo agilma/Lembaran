@@ -54,12 +54,13 @@ export function ReadingView({ reading }: ReadingViewProps) {
             validIndex = savedIndex;
           }
 
-          let validCounts = new Array(sections.length).fill(0);
-          if (
-            Array.isArray(savedCounts) &&
-            savedCounts.length === sections.length
-          ) {
-            validCounts = savedCounts.map((c) => (typeof c === 'number' ? c : 0));
+          const validCounts = new Array(sections.length).fill(0);
+          if (Array.isArray(savedCounts)) {
+            for (let i = 0; i < sections.length; i++) {
+              if (typeof savedCounts[i] === 'number') {
+                validCounts[i] = savedCounts[i];
+              }
+            }
           }
 
           setActiveIndex(validIndex);
@@ -86,12 +87,13 @@ export function ReadingView({ reading }: ReadingViewProps) {
                 validIndex = savedIndex;
               }
 
-              let validCounts = new Array(sections.length).fill(0);
-              if (
-                Array.isArray(savedCounts) &&
-                savedCounts.length === sections.length
-              ) {
-                validCounts = savedCounts.map((c) => (typeof c === 'number' ? c : 0));
+              const validCounts = new Array(sections.length).fill(0);
+              if (Array.isArray(savedCounts)) {
+                for (let i = 0; i < sections.length; i++) {
+                  if (typeof savedCounts[i] === 'number') {
+                    validCounts[i] = savedCounts[i];
+                  }
+                }
               }
 
               setActiveIndex(validIndex);
@@ -215,7 +217,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
         console.error('Non-blocking persistence error:', err);
       });
 
-      // 2. Clear saved progress in Supabase and localStorage
+      // 2. Clear saved active progress in Supabase and localStorage
       deleteReadingProgress(reading.slug).catch((err) => {
         console.error('Failed to delete server progress:', err);
       });
