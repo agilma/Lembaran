@@ -156,7 +156,7 @@ export default function KalenderClient({
           <div className="flex items-center gap-2">
             <Link
               href="/riwayat"
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex items-center gap-1.5"
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex items-center gap-1.5 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400"
             >
               <svg
                 className="w-4 h-4 text-slate-500"
@@ -200,7 +200,7 @@ export default function KalenderClient({
             <button
               type="button"
               onClick={handleGoToToday}
-              className="text-xs font-medium px-2.5 py-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors border border-slate-200/80 dark:border-slate-700 cursor-pointer"
+              className="text-xs font-medium px-2.5 py-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors border border-slate-200/80 dark:border-slate-700 cursor-pointer focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400"
               title="Kembali ke Hari Ini"
             >
               Hari Ini
@@ -209,7 +209,7 @@ export default function KalenderClient({
               type="button"
               onClick={handlePrevMonth}
               aria-label="Bulan Sebelumnya"
-              className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors border border-slate-200/80 dark:border-slate-700 cursor-pointer"
+              className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors border border-slate-200/80 dark:border-slate-700 cursor-pointer focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400"
             >
               <svg
                 className="w-5 h-5"
@@ -229,7 +229,7 @@ export default function KalenderClient({
               type="button"
               onClick={handleNextMonth}
               aria-label="Bulan Berikutnya"
-              className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors border border-slate-200/80 dark:border-slate-700 cursor-pointer"
+              className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors border border-slate-200/80 dark:border-slate-700 cursor-pointer focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400"
             >
               <svg
                 className="w-5 h-5"
@@ -280,12 +280,23 @@ export default function KalenderClient({
               completionCount,
             } = cell;
 
+            const dateLabel = `${formatJakartaDateLong(isoDateKey)}${
+              isToday ? " (Hari ini)" : ""
+            }, ${
+              hasCompletions
+                ? `${completionCount} bacaan selesai`
+                : "tidak ada aktivitas"
+            }`;
+
             return (
               <button
                 key={isoDateKey}
                 type="button"
                 onClick={() => setSelectedDateKey(isoDateKey)}
-                className={`relative h-11 sm:h-14 rounded-xl flex flex-col items-center justify-center transition-all cursor-pointer select-none text-xs sm:text-sm font-medium ${
+                aria-label={dateLabel}
+                aria-selected={isSelected}
+                aria-current={isToday ? "date" : undefined}
+                className={`relative h-11 sm:h-14 rounded-xl flex flex-col items-center justify-center transition-all cursor-pointer select-none text-xs sm:text-sm font-medium focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 ${
                   isSelected
                     ? "bg-emerald-800 text-white dark:bg-emerald-700 ring-2 ring-emerald-600 dark:ring-emerald-400 shadow-sm"
                     : isToday
@@ -378,7 +389,7 @@ export default function KalenderClient({
 
                   <Link
                     href={`/bacaan/${item.readingSlug}`}
-                    className="shrink-0 text-xs font-medium text-emerald-800 dark:text-emerald-400 hover:underline bg-emerald-50 dark:bg-emerald-950/50 px-3 py-1.5 rounded-lg border border-emerald-200/50 dark:border-emerald-800/50 flex items-center gap-1"
+                    className="shrink-0 text-xs font-medium text-emerald-800 dark:text-emerald-400 hover:underline bg-emerald-50 dark:bg-emerald-950/50 px-3 py-1.5 rounded-lg border border-emerald-200/50 dark:border-emerald-800/50 flex items-center gap-1 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400"
                   >
                     <span>Buka</span>
                     <svg
@@ -403,7 +414,7 @@ export default function KalenderClient({
           <div className="p-6 sm:p-8 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-center space-y-2">
             <div className="text-2xl">🌱</div>
             <p className="text-sm font-medium text-slate-600 dark:text-slate-400">
-              Tidak ada aktivitas amalan pada tanggal ini.
+              Belum ada amalan yang diselesaikan pada tanggal ini.
             </p>
             <p className="text-xs text-slate-400 dark:text-slate-500">
               Pilih tanggal lain di kalender yang memiliki indikator aktivitas.
