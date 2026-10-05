@@ -385,11 +385,8 @@ export function ReadingView({ reading }: ReadingViewProps) {
               {/* Step Indicators */}
               <div className="flex gap-1.5 items-center py-1">
                 {sections.map((sec, idx) => {
-                  const secHasCounter =
-                    typeof sec.repeatCount === 'number' && sec.repeatCount > 0;
-                  const secReached =
-                    secHasCounter && counts[idx] >= sec.repeatCount!;
                   const isCurrent = idx === activeIndex;
+                  const isPassed = idx < activeIndex;
                   return (
                     <button
                       key={sec.id}
@@ -409,7 +406,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
                         className={`block h-2 rounded-full transition-all ${
                           isCurrent
                             ? 'bg-emerald-800 dark:bg-emerald-500 shadow-xs'
-                            : secReached
+                            : isPassed
                             ? 'bg-emerald-400 dark:bg-emerald-700'
                             : 'bg-slate-200 dark:bg-slate-800 group-hover:bg-slate-300 dark:group-hover:bg-slate-700'
                         }`}

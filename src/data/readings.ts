@@ -1,6 +1,7 @@
 import { Reading } from '@/types/reading';
+import { validateReadingsData } from '@/lib/reading-validation';
 
-export const readingsData: Reading[] = [
+const rawReadingsData: Reading[] = [
   {
     id: '1',
     slug: 'sholawat-wahidiyah',
@@ -270,3 +271,6 @@ export const readingsData: Reading[] = [
     ]
   }
 ];
+
+// Validate readings data at load/build time to ensure early failure if content is invalid
+export const readingsData: Reading[] = validateReadingsData(rawReadingsData);
