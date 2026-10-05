@@ -27,6 +27,12 @@ export function ReadingView({ reading }: ReadingViewProps) {
   const [isProgressLoaded, setIsProgressLoaded] = useState<boolean>(false);
   const readerRef = useRef<HTMLDivElement>(null);
 
+  const scrollToReader = useCallback(() => {
+    if (readerRef.current) {
+      readerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
+
   // Load initial saved progress from server (Supabase) or guest fallback (localStorage)
   useEffect(() => {
     let isSubscribed = true;
@@ -190,6 +196,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
       const nextIndex = activeIndex - 1;
       setActiveIndex(nextIndex);
       persistProgress(nextIndex, counts);
+      scrollToReader();
     }
   };
 
@@ -198,9 +205,11 @@ export function ReadingView({ reading }: ReadingViewProps) {
       const nextIndex = activeIndex + 1;
       setActiveIndex(nextIndex);
       persistProgress(nextIndex, counts);
+      scrollToReader();
     } else {
       // Completed reading!
       setIsCompleted(true);
+      scrollToReader();
 
       const totalCount = counts.reduce((sum, val) => sum + val, 0);
       const totalTarget = sections.reduce(
@@ -243,22 +252,16 @@ export function ReadingView({ reading }: ReadingViewProps) {
     deleteReadingProgress(reading.slug).catch(() => {});
   };
 
-  const scrollToReader = () => {
-    if (readerRef.current) {
-      readerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
-
   return (
     <article className="space-y-6 pb-16 max-w-2xl mx-auto px-1 sm:px-0">
       {/* Navigation & Header */}
       <div className="space-y-4">
         <Link
           href="/"
-          className="inline-flex items-center text-xs sm:text-sm font-medium text-slate-500 hover:text-emerald-800 dark:text-slate-400 dark:hover:text-emerald-400 transition-colors group"
+          className="inline-flex items-center text-xs sm:text-sm font-medium text-slate-500 hover:text-emerald-800 dark:text-slate-400 dark:hover:text-emerald-400 transition-colors group focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 rounded-md py-1 px-1 -ml-1"
         >
           <svg
-            className="w-4 h-4 mr-1 transition-transform group-hover:-translate-x-0.5"
+            className="w-4 h-4 mr-1 shrink-0 transition-transform group-hover:-translate-x-0.5"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -301,7 +304,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
               <button
                 type="button"
                 onClick={scrollToReader}
-                className="inline-flex items-center justify-center text-sm font-semibold text-white bg-emerald-800 hover:bg-emerald-900 dark:bg-emerald-700 dark:hover:bg-emerald-600 px-5 py-2.5 rounded-lg transition-colors shadow-xs cursor-pointer active:scale-[0.99]"
+                className="inline-flex items-center justify-center text-sm font-semibold text-white bg-emerald-800 hover:bg-emerald-900 dark:bg-emerald-700 dark:hover:bg-emerald-600 px-5 py-2.5 rounded-lg transition-colors shadow-xs cursor-pointer active:scale-[0.99] touch-manipulation focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
               >
                 Mulai Membaca
               </button>
@@ -339,10 +342,10 @@ export function ReadingView({ reading }: ReadingViewProps) {
             <button
               type="button"
               onClick={handleResetAll}
-              className="w-full sm:w-auto inline-flex items-center justify-center text-sm font-semibold text-white bg-emerald-800 hover:bg-emerald-900 dark:bg-emerald-700 dark:hover:bg-emerald-600 px-6 py-3 rounded-xl transition-colors shadow-xs cursor-pointer active:scale-[0.99]"
+              className="w-full sm:w-auto inline-flex items-center justify-center text-sm font-semibold text-white bg-emerald-800 hover:bg-emerald-900 dark:bg-emerald-700 dark:hover:bg-emerald-600 px-6 py-3 rounded-xl transition-colors shadow-xs cursor-pointer active:scale-[0.99] touch-manipulation focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
             >
               <svg
-                className="w-4 h-4 mr-2"
+                className="w-4 h-4 mr-2 shrink-0"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -359,7 +362,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
             </button>
             <Link
               href="/"
-              className="w-full sm:w-auto inline-flex items-center justify-center text-sm font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200/80 dark:border-slate-700 px-6 py-3 rounded-xl transition-colors"
+              className="w-full sm:w-auto inline-flex items-center justify-center text-sm font-medium text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200/80 dark:border-slate-700 px-6 py-3 rounded-xl transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
             >
               Ke Halaman Utama
             </Link>
@@ -367,7 +370,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
         </section>
       ) : sections.length > 0 ? (
         /* Reading Mode & Interactive Section Reader */
-        <div ref={readerRef} className="space-y-6 scroll-mt-6">
+        <div ref={readerRef} className="space-y-6 scroll-mt-20">
           {/* Section Progress Bar */}
           {sections.length > 1 && (
             <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
@@ -380,12 +383,13 @@ export function ReadingView({ reading }: ReadingViewProps) {
                 </span>
               </div>
               {/* Step Indicators */}
-              <div className="flex gap-1.5">
+              <div className="flex gap-1.5 items-center py-1">
                 {sections.map((sec, idx) => {
                   const secHasCounter =
                     typeof sec.repeatCount === 'number' && sec.repeatCount > 0;
                   const secReached =
                     secHasCounter && counts[idx] >= sec.repeatCount!;
+                  const isCurrent = idx === activeIndex;
                   return (
                     <button
                       key={sec.id}
@@ -393,16 +397,24 @@ export function ReadingView({ reading }: ReadingViewProps) {
                       onClick={() => {
                         setActiveIndex(idx);
                         persistProgress(idx, counts);
+                        scrollToReader();
                       }}
-                      aria-label={`Pindah ke bagian ${idx + 1}`}
-                      className={`h-2 flex-1 rounded-full transition-all cursor-pointer ${
-                        idx === activeIndex
-                          ? 'bg-emerald-800 dark:bg-emerald-500'
-                          : secReached
-                          ? 'bg-emerald-400 dark:bg-emerald-700'
-                          : 'bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700'
+                      aria-current={isCurrent ? 'step' : undefined}
+                      aria-label={`Pindah ke bagian ${idx + 1}${
+                        sec.title ? `: ${sec.title}` : ''
                       }`}
-                    />
+                      className="py-2.5 -my-2.5 flex-1 group cursor-pointer focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 rounded-full"
+                    >
+                      <span
+                        className={`block h-2 rounded-full transition-all ${
+                          isCurrent
+                            ? 'bg-emerald-800 dark:bg-emerald-500 shadow-xs'
+                            : secReached
+                            ? 'bg-emerald-400 dark:bg-emerald-700'
+                            : 'bg-slate-200 dark:bg-slate-800 group-hover:bg-slate-300 dark:group-hover:bg-slate-700'
+                        }`}
+                      />
+                    </button>
                   );
                 })}
               </div>
@@ -422,7 +434,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
               {hasCounter && isTargetReached && (
                 <span className="inline-flex items-center text-xs font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-200/50 dark:border-emerald-800/50">
                   <svg
-                    className="w-3.5 h-3.5 mr-1"
+                    className="w-3.5 h-3.5 mr-1 shrink-0"
                     fill="currentColor"
                     viewBox="0 0 20 20"
                     aria-hidden="true"
@@ -451,7 +463,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
             {/* Arabic Text */}
             {currentSection.arabic && (
               <div
-                className="text-right py-4 font-arabic text-2xl sm:text-3xl text-slate-900 dark:text-amber-100 leading-loose sm:leading-loose tracking-wide break-words"
+                className="text-right py-4 sm:py-6 font-arabic text-2xl sm:text-3xl text-slate-900 dark:text-amber-100 leading-loose sm:leading-[2.3] tracking-wide break-words select-text"
                 dir="rtl"
                 lang="ar"
               >
@@ -492,13 +504,13 @@ export function ReadingView({ reading }: ReadingViewProps) {
                         setIsTranslationExpanded(!isTranslationExpanded)
                       }
                       aria-expanded={isTranslationExpanded}
-                      className="mt-1.5 inline-flex items-center text-xs font-semibold text-emerald-800 dark:text-emerald-400 hover:underline cursor-pointer focus:outline-hidden"
+                      className="mt-1.5 inline-flex items-center text-xs font-semibold text-emerald-800 dark:text-emerald-400 hover:underline cursor-pointer focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 rounded-sm"
                     >
                       {isTranslationExpanded ? (
                         <>
                           <span>Sembunyikan</span>
                           <svg
-                            className="w-3.5 h-3.5 ml-1"
+                            className="w-3.5 h-3.5 ml-1 shrink-0"
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
@@ -516,7 +528,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
                         <>
                           <span>Baca selengkapnya</span>
                           <svg
-                            className="w-3.5 h-3.5 ml-1"
+                            className="w-3.5 h-3.5 ml-1 shrink-0"
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
@@ -559,7 +571,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
                     type="button"
                     onClick={handleResetSection}
                     disabled={currentCount === 0}
-                    className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-colors ${
+                    className={`min-h-[36px] inline-flex items-center text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 ${
                       currentCount === 0
                         ? 'text-slate-300 dark:text-slate-600 cursor-not-allowed'
                         : 'text-slate-500 dark:text-slate-400 hover:text-red-700 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 cursor-pointer'
@@ -591,11 +603,11 @@ export function ReadingView({ reading }: ReadingViewProps) {
                 <button
                   type="button"
                   onClick={handleIncrement}
-                  className="w-full min-h-[60px] py-3.5 px-4 bg-emerald-800 dark:bg-emerald-700 hover:bg-emerald-900 dark:hover:bg-emerald-600 active:bg-emerald-950 text-white rounded-xl font-bold shadow-xs transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer select-none active:scale-[0.98] touch-manipulation focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2"
+                  className="w-full min-h-[60px] py-4 px-5 bg-emerald-800 dark:bg-emerald-700 hover:bg-emerald-900 dark:hover:bg-emerald-600 active:bg-emerald-950 text-white rounded-xl font-bold shadow-xs transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer select-none active:scale-[0.98] touch-manipulation focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
                   aria-label={`Tambah hitungan, saat ini ${currentCount} dari ${targetCount}`}
                 >
                   <svg
-                    className="w-6 h-6"
+                    className="w-6 h-6 shrink-0"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -608,7 +620,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
                       d="M12 4v16m8-8H4"
                     />
                   </svg>
-                  <span>Tambah Hitungan</span>
+                  <span className="text-base sm:text-lg">Tambah Hitungan</span>
                 </button>
               </div>
             )}
@@ -620,15 +632,15 @@ export function ReadingView({ reading }: ReadingViewProps) {
               type="button"
               onClick={handlePrev}
               disabled={activeIndex === 0}
-              className={`flex-1 inline-flex items-center justify-center py-3.5 px-4 rounded-xl text-sm font-semibold transition-all ${
+              className={`flex-1 min-h-[48px] inline-flex items-center justify-center py-3 px-4 rounded-xl text-sm font-semibold transition-all focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 ${
                 activeIndex === 0
                   ? 'bg-slate-100 dark:bg-slate-800/50 text-slate-300 dark:text-slate-600 cursor-not-allowed border border-slate-200/50 dark:border-slate-800'
-                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200/80 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-[0.99]'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200/80 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-[0.99] touch-manipulation'
               }`}
               aria-label="Ke bagian sebelumnya"
             >
               <svg
-                className="w-4 h-4 mr-1.5"
+                className="w-4 h-4 mr-1.5 shrink-0"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -647,16 +659,16 @@ export function ReadingView({ reading }: ReadingViewProps) {
             <button
               type="button"
               onClick={handleNext}
-              className="flex-1 inline-flex items-center justify-center py-3.5 px-4 rounded-xl text-sm font-semibold bg-emerald-800 dark:bg-emerald-700 text-white hover:bg-emerald-900 dark:hover:bg-emerald-600 shadow-2xs cursor-pointer active:scale-[0.99] transition-all"
+              className="flex-1 min-h-[48px] inline-flex items-center justify-center py-3 px-4 rounded-xl text-sm font-semibold bg-emerald-800 dark:bg-emerald-700 text-white hover:bg-emerald-900 dark:hover:bg-emerald-600 shadow-2xs cursor-pointer active:scale-[0.99] transition-all touch-manipulation focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
               aria-label={
                 activeIndex === sections.length - 1
                   ? 'Selesaikan bacaan'
                   : 'Ke bagian selanjutnya'
               }
             >
-              {activeIndex === sections.length - 1 ? 'Selesai' : 'Selanjutnya'}
+              <span>{activeIndex === sections.length - 1 ? 'Selesai' : 'Selanjutnya'}</span>
               <svg
-                className="w-4 h-4 ml-1.5"
+                className="w-4 h-4 ml-1.5 shrink-0"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
