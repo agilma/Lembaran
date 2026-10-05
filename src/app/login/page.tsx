@@ -1,8 +1,9 @@
+import { Suspense } from "react";
 import { getCurrentUser } from "@/lib/auth-utils";
 import LoginClient from "./login-client";
 
 export const metadata = {
-  title: "Masuk - Lembaran",
+  title: "Masuk Akun - Lembaran",
   description: "Halaman masuk akun Lembaran",
 };
 
@@ -18,5 +19,15 @@ export default async function LoginPage() {
       }
     : null;
 
-  return <LoginClient initialUser={sessionInfo} />;
+  return (
+    <Suspense
+      fallback={
+        <div className="max-w-md mx-auto px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
+          Memuat...
+        </div>
+      }
+    >
+      <LoginClient initialUser={sessionInfo} />
+    </Suspense>
+  );
 }

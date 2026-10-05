@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { signIn, signOut } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 
 interface UserSessionInfo {
   id: string;
@@ -14,7 +15,24 @@ interface LoginClientProps {
   initialUser: UserSessionInfo | null;
 }
 
+export function sanitizeCallbackUrl(rawUrl?: string | null): string {
+  if (!rawUrl) return "/";
+  const trimmed = rawUrl.trim();
+  if (
+    trimmed.startsWith("/") &&
+    !trimmed.startsWith("//") &&
+    !trimmed.startsWith("/\\")
+  ) {
+    return trimmed;
+  }
+  return "/";
+}
+
 export default function LoginClient({ initialUser }: LoginClientProps) {
+  const searchParams = useSearchParams();
+  const rawCallbackUrl = searchParams.get("callbackUrl");
+  const callbackUrl = sanitizeCallbackUrl(rawCallbackUrl);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -35,7 +53,7 @@ export default function LoginClient({ initialUser }: LoginClientProps) {
       if (res?.error) {
         setErrorMessage("Email atau kata sandi tidak valid.");
       } else {
-        window.location.reload();
+        window.location.href = callbackUrl;
       }
     } catch {
       setErrorMessage("Terjadi kesalahan saat masuk. Silakan coba lagi.");
@@ -44,23 +62,47 @@ export default function LoginClient({ initialUser }: LoginClientProps) {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith("lembaran_progress_")) {
+          localStorage.removeItem(key);
+        }
+      }
+    } catch (err) {
+      console.error("Gagal membersihkan localStorage pada logout:", err);
+    }
+    await signOut({ callbackUrl: "/login" });
+  };
+
   return (
     <div className="max-w-md mx-auto px-4 py-8">
       {initialUser ? (
         <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-xs border border-slate-200 dark:border-slate-800 space-y-6">
           <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
-            <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">Profil Administrator</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Anda terautentikasi sebagai Administrator.</p>
+            <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+              Profil Akun
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+              Anda terautentikasi sebagai pengguna terdaftar.
+            </p>
           </div>
 
           <div className="space-y-3 text-sm">
-            <div className="flex justify-between py-1.5 border-b border-slate-50 dark:border-slate-800/50">
-              <span className="text-slate-500 dark:text-slate-400">Nama</span>
-              <span className="font-semibold text-slate-800 dark:text-slate-200">{initialUser.name || "-"}</span>
-            </div>
+            {initialUser.name && (
+              <div className="flex justify-between py-1.5 border-b border-slate-50 dark:border-slate-800/50">
+                <span className="text-slate-500 dark:text-slate-400">Nama</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">
+                  {initialUser.name}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between py-1.5 border-b border-slate-50 dark:border-slate-800/50">
               <span className="text-slate-500 dark:text-slate-400">Email</span>
-              <span className="font-medium text-slate-800 dark:text-slate-200">{initialUser.email}</span>
+              <span className="font-medium text-slate-800 dark:text-slate-200">
+                {initialUser.email}
+              </span>
             </div>
             <div className="flex justify-between py-1.5 border-b border-slate-50 dark:border-slate-800/50">
               <span className="text-slate-500 dark:text-slate-400">Peran</span>
@@ -71,7 +113,7 @@ export default function LoginClient({ initialUser }: LoginClientProps) {
           </div>
 
           <button
-            onClick={() => signOut({ callbackUrl: "/login" })}
+            onClick={handleLogout}
             className="w-full py-2.5 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-sm font-semibold rounded-xl transition-colors cursor-pointer border border-rose-200/50 dark:border-rose-800/50"
           >
             Keluar (Logout)
@@ -80,8 +122,12 @@ export default function LoginClient({ initialUser }: LoginClientProps) {
       ) : (
         <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-xs border border-slate-200 dark:border-slate-800 space-y-6">
           <div className="text-center space-y-1">
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Masuk Administrator</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Silakan masukkan email dan kata sandi Administrator</p>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+              Masuk Akun
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Silakan masukkan email dan kata sandi Anda
+            </p>
           </div>
 
           {errorMessage && (
@@ -92,19 +138,23 @@ export default function LoginClient({ initialUser }: LoginClientProps) {
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Email</label>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Email
+              </label>
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@lembaran.app"
+                placeholder="user@lembaran.app"
                 className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-800/20 dark:focus:ring-emerald-500/20 focus:border-emerald-800 dark:focus:border-emerald-500"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Kata Sandi</label>
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                Kata Sandi
+              </label>
               <input
                 type="password"
                 required
