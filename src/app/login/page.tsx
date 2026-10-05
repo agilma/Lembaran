@@ -6,8 +6,15 @@ export const metadata = {
   description: "Halaman masuk akun Lembaran",
 };
 
-export default async function LoginPage() {
+interface LoginPageProps {
+  searchParams: Promise<{
+    callbackUrl?: string;
+  }>;
+}
+
+export default async function LoginPage({ searchParams }: LoginPageProps) {
   const user = await getCurrentUser();
+  const resolvedParams = await searchParams;
 
   const sessionInfo = user
     ? {
@@ -18,5 +25,10 @@ export default async function LoginPage() {
       }
     : null;
 
-  return <LoginClient initialUser={sessionInfo} />;
+  return (
+    <LoginClient
+      initialUser={sessionInfo}
+      callbackUrl={resolvedParams?.callbackUrl}
+    />
+  );
 }

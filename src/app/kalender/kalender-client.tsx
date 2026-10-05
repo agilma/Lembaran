@@ -63,7 +63,7 @@ export default function KalenderClient({
           </p>
         </div>
         <Link
-          href="/login"
+          href="/login?callbackUrl=/kalender"
           className="inline-flex items-center justify-center px-6 py-3 bg-emerald-800 hover:bg-emerald-900 dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white font-semibold rounded-xl text-sm transition-colors shadow-xs"
         >
           Masuk ke Akun
