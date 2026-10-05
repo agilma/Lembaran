@@ -1,4 +1,4 @@
-import { getCurrentUser } from "@/lib/auth-utils";
+import { getCurrentUser, sanitizeCallbackUrl } from "@/lib/auth-utils";
 import LoginClient from "./login-client";
 
 export const metadata = {
@@ -6,7 +6,13 @@ export const metadata = {
   description: "Halaman masuk akun Lembaran",
 };
 
-export default async function LoginPage() {
+interface LoginPageProps {
+  searchParams?: Promise<{ callbackUrl?: string }>;
+}
+
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const params = searchParams ? await searchParams : {};
+  const callbackUrl = sanitizeCallbackUrl(params.callbackUrl, "/");
   const user = await getCurrentUser();
 
   const sessionInfo = user
@@ -18,5 +24,5 @@ export default async function LoginPage() {
       }
     : null;
 
-  return <LoginClient initialUser={sessionInfo} />;
+  return <LoginClient initialUser={sessionInfo} callbackUrl={callbackUrl} />;
 }

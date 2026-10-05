@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/lib/__tests__/*.test.ts"
+    "test": "AUTH_SECRET=test-auth-secret-key-32-chars-length tsx --test src/lib/__tests__/*.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
