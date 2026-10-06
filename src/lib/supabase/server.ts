@@ -1,17 +1,48 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { createServerClient } from "@supabase/ssr";
+import { createClient as createSupabaseJsClient, SupabaseClient } from "@supabase/supabase-js";
+import { cookies } from "next/headers";
 
-let supabaseClientInstance: SupabaseClient | null = null;
+export async function createClient() {
+  const cookieStore = await cookies();
 
-export function getSupabaseServerClient(): SupabaseClient | null {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+
+  return createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options)
+          );
+        } catch {
+          // The `setAll` method was called from a Server Component.
+          // This can be ignored if you have middleware refreshing user sessions.
+        }
+      },
+    },
+  });
+}
+
+/**
+ * Service role / secret client for server-only trusted administrative operations.
+ * DO NOT expose to client or use to bypass RLS for standard user actions.
+ */
+let adminClientInstance: SupabaseClient | null = null;
+
+export function getSupabaseAdminClient(): SupabaseClient | null {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SECRET_KEY;
+  const secretKey = process.env.SUPABASE_SECRET_KEY;
 
-  if (!supabaseUrl || !supabaseKey) {
+  if (!supabaseUrl || !secretKey) {
     return null;
   }
 
-  if (!supabaseClientInstance) {
-    supabaseClientInstance = createClient(supabaseUrl, supabaseKey, {
+  if (!adminClientInstance) {
+    adminClientInstance = createSupabaseJsClient(supabaseUrl, secretKey, {
       auth: {
         persistSession: false,
         autoRefreshToken: false,
@@ -19,5 +50,5 @@ export function getSupabaseServerClient(): SupabaseClient | null {
     });
   }
 
-  return supabaseClientInstance;
+  return adminClientInstance;
 }
