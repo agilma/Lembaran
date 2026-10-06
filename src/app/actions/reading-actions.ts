@@ -1,7 +1,7 @@
 "use server";
 
 import { getCurrentUser } from "@/lib/auth-utils";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { readingsData } from "@/data/readings";
 import { formatInJakartaTimezone } from "@/lib/date-utils";
 
@@ -80,7 +80,6 @@ export async function recordReadingCompletion(
   try {
     const user = await getCurrentUser();
 
-    // If user is guest/unauthenticated, do not persist to Supabase but return graceful response
     if (!user) {
       return {
         success: true,
@@ -89,10 +88,7 @@ export async function recordReadingCompletion(
       };
     }
 
-    const supabase = getSupabaseServerClient();
-
-    // If Supabase credentials are not configured, log gracefully without throwing
-    if (!supabase) {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       console.warn("Supabase credentials not configured. Skipping server persistence.");
       return {
         success: true,
@@ -101,10 +97,11 @@ export async function recordReadingCompletion(
       };
     }
 
+    const supabase = await createClient();
     const completedAt = new Date().toISOString();
 
     const { error } = await supabase.from("reading_completions").insert({
-      user_id: user.id, // Strictly taken from NextAuth session on server
+      user_id: user.id,
       reading_slug: params.readingSlug,
       count: params.count ?? null,
       target: params.target ?? null,
@@ -141,11 +138,11 @@ export async function getReadingProgress(
       return { success: true, data: null, message: "Unauthenticated user" };
     }
 
-    const supabase = getSupabaseServerClient();
-    if (!supabase) {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       return { success: true, data: null, message: "Supabase persistence not configured" };
     }
 
+    const supabase = await createClient();
     const { data, error } = await supabase
       .from("reading_progress")
       .select("active_index, counts, updated_at")
@@ -189,8 +186,7 @@ export async function saveReadingProgress(
       };
     }
 
-    const supabase = getSupabaseServerClient();
-    if (!supabase) {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       return {
         success: true,
         message: "Supabase not configured",
@@ -198,6 +194,7 @@ export async function saveReadingProgress(
       };
     }
 
+    const supabase = await createClient();
     const updatedAt = new Date().toISOString();
 
     const { error } = await supabase.from("reading_progress").upsert(
@@ -245,8 +242,7 @@ export async function deleteReadingProgress(
       };
     }
 
-    const supabase = getSupabaseServerClient();
-    if (!supabase) {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       return {
         success: true,
         message: "Supabase not configured",
@@ -254,6 +250,7 @@ export async function deleteReadingProgress(
       };
     }
 
+    const supabase = await createClient();
     const { error } = await supabase
       .from("reading_progress")
       .delete()
@@ -294,8 +291,7 @@ export async function getReadingHistory(): Promise<GetReadingHistoryResult> {
       };
     }
 
-    const supabase = getSupabaseServerClient();
-    if (!supabase) {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       return {
         success: true,
         completions: [],
@@ -305,6 +301,7 @@ export async function getReadingHistory(): Promise<GetReadingHistoryResult> {
       };
     }
 
+    const supabase = await createClient();
     const { data, error } = await supabase
       .from("reading_completions")
       .select("id, reading_slug, count, target, completed_at")
@@ -375,7 +372,7 @@ export async function getReadingHistory(): Promise<GetReadingHistoryResult> {
       })
     );
 
-    // Compute date summary (for Calendar / Date View readiness)
+    // Compute date summary
     const dateSummaryMap = new Map<string, { dateString: string; count: number }>();
     completions.forEach((c) => {
       const existing = dateSummaryMap.get(c.isoDateKey);
