@@ -253,7 +253,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
   };
 
   return (
-    <article className="space-y-6 pb-16 max-w-2xl mx-auto px-1 sm:px-0">
+    <article className="space-y-6 pb-[calc(7rem+env(safe-area-inset-bottom,0px))] sm:pb-16 max-w-2xl mx-auto px-1 sm:px-0">
       {/* Navigation & Header */}
       <div className="space-y-4">
         <Link
@@ -624,62 +624,67 @@ export function ReadingView({ reading }: ReadingViewProps) {
           </div>
 
           {/* Section Navigation Flow */}
-          <div className="flex items-center justify-between gap-3 pt-2">
-            <button
-              type="button"
-              onClick={handlePrev}
-              disabled={activeIndex === 0}
-              className={`flex-1 min-h-[48px] inline-flex items-center justify-center py-3 px-4 rounded-xl text-sm font-semibold transition-all focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 ${
-                activeIndex === 0
-                  ? 'bg-slate-100 dark:bg-slate-800/50 text-slate-300 dark:text-slate-600 cursor-not-allowed border border-slate-200/50 dark:border-slate-800'
-                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200/80 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-[0.99] touch-manipulation'
-              }`}
-              aria-label="Ke bagian sebelumnya"
-            >
-              <svg
-                className="w-4 h-4 mr-1.5 shrink-0"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
+          <nav
+            aria-label="Navigasi Bagian Bacaan"
+            className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200/80 dark:border-slate-800 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] sm:static sm:z-auto sm:bg-transparent sm:border-0 sm:p-0 sm:pb-0 sm:backdrop-blur-none transition-all"
+          >
+            <div className="max-w-2xl mx-auto flex items-center justify-between gap-3 sm:pt-2">
+              <button
+                type="button"
+                onClick={handlePrev}
+                disabled={activeIndex === 0}
+                className={`flex-1 min-h-[48px] inline-flex items-center justify-center py-3 px-4 rounded-xl text-sm font-semibold transition-all focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 ${
+                  activeIndex === 0
+                    ? 'bg-slate-100 dark:bg-slate-800/50 text-slate-300 dark:text-slate-600 cursor-not-allowed border border-slate-200/50 dark:border-slate-800'
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200/80 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-[0.99] touch-manipulation'
+                }`}
+                aria-label="Ke bagian sebelumnya"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15 19l-7-7 7-7"
-                />
-              </svg>
-              Sebelumnya
-            </button>
+                <svg
+                  className="w-4 h-4 mr-1.5 shrink-0"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+                Sebelumnya
+              </button>
 
-            <button
-              type="button"
-              onClick={handleNext}
-              className="flex-1 min-h-[48px] inline-flex items-center justify-center py-3 px-4 rounded-xl text-sm font-semibold bg-emerald-800 dark:bg-emerald-700 text-white hover:bg-emerald-900 dark:hover:bg-emerald-600 shadow-2xs cursor-pointer active:scale-[0.99] transition-all touch-manipulation focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
-              aria-label={
-                activeIndex === sections.length - 1
-                  ? 'Selesaikan bacaan'
-                  : 'Ke bagian selanjutnya'
-              }
-            >
-              <span>{activeIndex === sections.length - 1 ? 'Selesai' : 'Selanjutnya'}</span>
-              <svg
-                className="w-4 h-4 ml-1.5 shrink-0"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
+              <button
+                type="button"
+                onClick={handleNext}
+                className="flex-1 min-h-[48px] inline-flex items-center justify-center py-3 px-4 rounded-xl text-sm font-semibold bg-emerald-800 dark:bg-emerald-700 text-white hover:bg-emerald-900 dark:hover:bg-emerald-600 shadow-2xs cursor-pointer active:scale-[0.99] transition-all touch-manipulation focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
+                aria-label={
+                  activeIndex === sections.length - 1
+                    ? 'Selesaikan bacaan'
+                    : 'Ke bagian selanjutnya'
+                }
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-            </button>
-          </div>
+                <span>{activeIndex === sections.length - 1 ? 'Selesai' : 'Selanjutnya'}</span>
+                <svg
+                  className="w-4 h-4 ml-1.5 shrink-0"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+              </button>
+            </div>
+          </nav>
         </div>
       ) : reading.content ? (
         <div className="prose dark:prose-invert prose-slate max-w-none text-slate-700 dark:text-slate-300 leading-relaxed bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200/80 dark:border-slate-800">
