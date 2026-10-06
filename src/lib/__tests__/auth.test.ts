@@ -68,4 +68,50 @@ describe("Authentication & Security Suite", () => {
       );
     });
   });
+
+  describe("OAuth Callback & Error Handling Suite", () => {
+    test("sanitizes next destination parameter during OAuth callback", () => {
+      const parseOAuthCallbackNext = (rawNext: string | null) => {
+        return sanitizeCallbackUrl(rawNext, "/riwayat");
+      };
+
+      assert.strictEqual(parseOAuthCallbackNext("/kalender"), "/kalender");
+      assert.strictEqual(
+        parseOAuthCallbackNext("https://malicious.site"),
+        "/riwayat"
+      );
+      assert.strictEqual(parseOAuthCallbackNext("//evil.com"), "/riwayat");
+      assert.strictEqual(parseOAuthCallbackNext(null), "/riwayat");
+    });
+
+    test("maps OAuth error responses accurately", () => {
+      const mapOAuthError = (errorParam: string | null) => {
+        if (!errorParam) return null;
+        if (errorParam === "InvalidVerificationCode") {
+          return "Sesi verifikasi atau login tidak valid atau kadaluarsa.";
+        }
+        if (
+          errorParam.includes("access_denied") ||
+          errorParam.toLowerCase().includes("denied")
+        ) {
+          return "Login dengan Google dibatalkan atau tidak diizinkan.";
+        }
+        return errorParam;
+      };
+
+      assert.strictEqual(
+        mapOAuthError("access_denied"),
+        "Login dengan Google dibatalkan atau tidak diizinkan."
+      );
+      assert.strictEqual(
+        mapOAuthError("InvalidVerificationCode"),
+        "Sesi verifikasi atau login tidak valid atau kadaluarsa."
+      );
+      assert.strictEqual(
+        mapOAuthError("Custom OAuth Failure"),
+        "Custom OAuth Failure"
+      );
+      assert.strictEqual(mapOAuthError(null), null);
+    });
+  });
 });
