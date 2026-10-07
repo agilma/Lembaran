@@ -9,6 +9,11 @@ import {
   saveReadingProgress,
   deleteReadingProgress,
 } from '@/app/actions/reading-actions';
+import {
+  SavedReadingProgress,
+  parseProgressData,
+  resolveReadingProgress,
+} from '@/lib/reading-progress';
 
 interface ReadingViewProps {
   reading: Reading;
@@ -33,112 +38,61 @@ export function ReadingView({ reading }: ReadingViewProps) {
     }
   }, []);
 
-  // Load initial saved progress prioritizing localStorage for instant response
+  // Load initial saved progress from server (Supabase) or guest fallback (localStorage)
   useEffect(() => {
     let isSubscribed = true;
 
     async function loadProgress() {
+      setIsProgressLoaded(false);
+
       if (sections.length === 0) {
-        setIsProgressLoaded(true);
+        if (isSubscribed) {
+          setIsProgressLoaded(true);
+        }
         return;
       }
 
       const storageKey = `lembaran_progress_${reading.slug}`;
-      let localData: { activeIndex?: number; counts?: number[]; updatedAt?: string } | null = null;
 
-      // 1. Immediately read and restore from localStorage
+      // 1. Read progress from localStorage
+      let localProgress: SavedReadingProgress | null = null;
       try {
         const localDataString = localStorage.getItem(storageKey);
         if (localDataString) {
           const parsed = JSON.parse(localDataString);
-          if (parsed && typeof parsed === 'object') {
-            localData = parsed;
-
-            let validIndex = 0;
-            if (
-              typeof parsed.activeIndex === 'number' &&
-              parsed.activeIndex >= 0 &&
-              parsed.activeIndex < sections.length
-            ) {
-              validIndex = parsed.activeIndex;
-            }
-
-            const validCounts = new Array(sections.length).fill(0);
-            if (Array.isArray(parsed.counts)) {
-              for (let i = 0; i < sections.length; i++) {
-                if (typeof parsed.counts[i] === 'number') {
-                  validCounts[i] = parsed.counts[i];
-                }
-              }
-            }
-
-            if (isSubscribed) {
-              setActiveIndex(validIndex);
-              setCounts(validCounts);
-              setIsProgressLoaded(true);
-            }
-          }
+          localProgress = parseProgressData(parsed, sections.length);
         }
       } catch (e) {
-        console.error('Failed to parse local reading progress:', e);
+        console.error('Failed to read or parse local reading progress:', e);
       }
 
-      if (!localData && isSubscribed) {
-        setIsProgressLoaded(true);
-      }
-
-      // 2. Sync with server progress if authenticated user and server data is newer or local is missing
+      // 2. Read progress from Supabase server (authenticated user)
+      let serverProgress: SavedReadingProgress | null = null;
       try {
         const res = await getReadingProgress(reading.slug);
-        if (isSubscribed && res.success && res.data) {
-          const { activeIndex: serverIndex, counts: serverCounts, updatedAt: serverUpdatedAt } = res.data;
-
-          const localTime = localData?.updatedAt ? new Date(localData.updatedAt).getTime() : 0;
-          const serverTime = serverUpdatedAt ? new Date(serverUpdatedAt).getTime() : 0;
-
-          if (!localData || (serverTime > 0 && serverTime > localTime)) {
-            let validIndex = 0;
-            if (
-              typeof serverIndex === 'number' &&
-              serverIndex >= 0 &&
-              serverIndex < sections.length
-            ) {
-              validIndex = serverIndex;
-            }
-
-            const validCounts = new Array(sections.length).fill(0);
-            if (Array.isArray(serverCounts)) {
-              for (let i = 0; i < sections.length; i++) {
-                if (typeof serverCounts[i] === 'number') {
-                  validCounts[i] = serverCounts[i];
-                }
-              }
-            }
-
-            setActiveIndex(validIndex);
-            setCounts(validCounts);
-
-            try {
-              localStorage.setItem(
-                storageKey,
-                JSON.stringify({
-                  activeIndex: validIndex,
-                  counts: validCounts,
-                  updatedAt: serverUpdatedAt || new Date().toISOString(),
-                })
-              );
-            } catch (e) {
-              console.error('Failed to sync server progress to localStorage:', e);
-            }
-          }
+        if (res.success && res.data) {
+          serverProgress = parseProgressData(res.data, sections.length);
         }
       } catch (err) {
-        console.error('Error loading reading progress from server:', err);
-      } finally {
-        if (isSubscribed) {
-          setIsProgressLoaded(true);
-        }
+        console.error('Error fetching server reading progress:', err);
       }
+
+      if (!isSubscribed) return;
+
+      // 3. Determine which progress to use
+      const chosenProgress = resolveReadingProgress(localProgress, serverProgress);
+
+      // 4. Set activeIndex and counts
+      if (chosenProgress) {
+        setActiveIndex(chosenProgress.activeIndex);
+        setCounts(chosenProgress.counts);
+      } else {
+        setActiveIndex(0);
+        setCounts(new Array(sections.length).fill(0));
+      }
+
+      // 5. Mark hydration complete
+      setIsProgressLoaded(true);
     }
 
     loadProgress();
@@ -153,7 +107,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
     setIsTranslationExpanded(false);
   }, [activeIndex]);
 
-  // Auto-save progress on activeIndex or counts update whenever state changes
+  // Auto-save progress on activeIndex or counts update whenever state changes after hydration
   useEffect(() => {
     if (!isProgressLoaded || isCompleted || sections.length === 0) return;
 
@@ -187,6 +141,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
 
       const storageKey = `lembaran_progress_${reading.slug}`;
 
+      // Save locally (for guest and fast local state)
       try {
         localStorage.setItem(
           storageKey,
@@ -200,6 +155,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
         console.error('Failed to write to localStorage:', e);
       }
 
+      // Save to Supabase (background fire-and-forget for logged-in user)
       saveReadingProgress({
         readingSlug: reading.slug,
         activeIndex: newIndex,
