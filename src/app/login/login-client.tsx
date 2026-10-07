@@ -3,7 +3,7 @@
 import { useState, useEffect, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { sanitizeCallbackUrl } from "@/lib/url-utils";
+import { sanitizeCallbackUrl, getAppOrigin } from "@/lib/url-utils";
 
 interface UserSessionInfo {
   id: string;
@@ -69,7 +69,7 @@ export default function LoginClient({ initialUser }: LoginClientProps) {
 
     try {
       const supabase = createClient();
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const origin = getAppOrigin();
       const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(callbackUrl)}`;
 
       const { error } = await supabase.auth.signInWithOAuth({
@@ -157,7 +157,7 @@ export default function LoginClient({ initialUser }: LoginClientProps) {
 
     try {
       const supabase = createClient();
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const origin = getAppOrigin();
       const emailRedirectTo = `${origin}/auth/callback?next=${encodeURIComponent(callbackUrl)}`;
 
       const { data, error } = await supabase.auth.signUp({
@@ -205,7 +205,7 @@ export default function LoginClient({ initialUser }: LoginClientProps) {
 
     try {
       const supabase = createClient();
-      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const origin = getAppOrigin();
       const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent("/reset-password")}`;
 
       const { error } = await supabase.auth.resetPasswordForEmail(email, {

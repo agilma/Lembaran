@@ -1,10 +1,44 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
-import { sanitizeCallbackUrl } from "../url-utils";
+import { sanitizeCallbackUrl, getAppOrigin } from "../url-utils";
 import { parseRole } from "../auth-utils";
 import { Role } from "../../types/user";
 
 describe("Authentication & Security Suite", () => {
+  describe("Application Origin Determination", () => {
+    test("prioritizes NEXT_PUBLIC_APP_URL when set", () => {
+      const originalEnv = process.env.NEXT_PUBLIC_APP_URL;
+      process.env.NEXT_PUBLIC_APP_URL = "https://custom-app.domain.com/";
+      assert.strictEqual(getAppOrigin(), "https://custom-app.domain.com");
+      process.env.NEXT_PUBLIC_APP_URL = originalEnv;
+    });
+
+    test("falls back to https://lembaran.vercel.app in production if env is missing", () => {
+      const originalEnv = process.env.NEXT_PUBLIC_APP_URL;
+      delete process.env.NEXT_PUBLIC_APP_URL;
+
+      assert.strictEqual(getAppOrigin(), "https://lembaran.vercel.app");
+
+      process.env.NEXT_PUBLIC_APP_URL = originalEnv;
+    });
+
+    test("uses request x-forwarded-host header when available", () => {
+      const originalEnv = process.env.NEXT_PUBLIC_APP_URL;
+      delete process.env.NEXT_PUBLIC_APP_URL;
+
+      const mockRequest = new Request("http://internal-host/auth/callback", {
+        headers: {
+          "x-forwarded-host": "lembaran.vercel.app",
+          "x-forwarded-proto": "https",
+        },
+      });
+
+      assert.strictEqual(getAppOrigin(mockRequest), "https://lembaran.vercel.app");
+
+      process.env.NEXT_PUBLIC_APP_URL = originalEnv;
+    });
+  });
+
   describe("Callback URL Sanitization", () => {
     test("allows safe relative internal paths", () => {
       assert.strictEqual(sanitizeCallbackUrl("/riwayat"), "/riwayat");
