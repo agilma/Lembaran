@@ -33,7 +33,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
     }
   }, []);
 
-  // Load initial saved progress from server (Supabase) or guest fallback (localStorage)
+  // Load initial saved progress prioritizing localStorage for instant response
   useEffect(() => {
     let isSubscribed = true;
 
@@ -44,73 +44,96 @@ export function ReadingView({ reading }: ReadingViewProps) {
       }
 
       const storageKey = `lembaran_progress_${reading.slug}`;
+      let localData: { activeIndex?: number; counts?: number[]; updatedAt?: string } | null = null;
 
+      // 1. Immediately read and restore from localStorage
       try {
-        // Attempt to fetch saved progress from server (authenticated user)
-        const res = await getReadingProgress(reading.slug);
-
-        if (isSubscribed && res.success && res.data) {
-          const { activeIndex: savedIndex, counts: savedCounts } = res.data;
-          let validIndex = 0;
-          if (
-            typeof savedIndex === 'number' &&
-            savedIndex >= 0 &&
-            savedIndex < sections.length
-          ) {
-            validIndex = savedIndex;
-          }
-
-          const validCounts = new Array(sections.length).fill(0);
-          if (Array.isArray(savedCounts)) {
-            for (let i = 0; i < sections.length; i++) {
-              if (typeof savedCounts[i] === 'number') {
-                validCounts[i] = savedCounts[i];
-              }
-            }
-          }
-
-          setActiveIndex(validIndex);
-          setCounts(validCounts);
-          setIsProgressLoaded(true);
-          return;
-        }
-
-        // Fallback for guest or when no server progress exists
         const localDataString = localStorage.getItem(storageKey);
-        if (isSubscribed && localDataString) {
-          try {
-            const parsed = JSON.parse(localDataString);
-            if (parsed && typeof parsed === 'object') {
-              const savedIndex = parsed.activeIndex;
-              const savedCounts = parsed.counts;
+        if (localDataString) {
+          const parsed = JSON.parse(localDataString);
+          if (parsed && typeof parsed === 'object') {
+            localData = parsed;
 
-              let validIndex = 0;
-              if (
-                typeof savedIndex === 'number' &&
-                savedIndex >= 0 &&
-                savedIndex < sections.length
-              ) {
-                validIndex = savedIndex;
-              }
+            let validIndex = 0;
+            if (
+              typeof parsed.activeIndex === 'number' &&
+              parsed.activeIndex >= 0 &&
+              parsed.activeIndex < sections.length
+            ) {
+              validIndex = parsed.activeIndex;
+            }
 
-              const validCounts = new Array(sections.length).fill(0);
-              if (Array.isArray(savedCounts)) {
-                for (let i = 0; i < sections.length; i++) {
-                  if (typeof savedCounts[i] === 'number') {
-                    validCounts[i] = savedCounts[i];
-                  }
+            const validCounts = new Array(sections.length).fill(0);
+            if (Array.isArray(parsed.counts)) {
+              for (let i = 0; i < sections.length; i++) {
+                if (typeof parsed.counts[i] === 'number') {
+                  validCounts[i] = parsed.counts[i];
                 }
               }
+            }
 
+            if (isSubscribed) {
               setActiveIndex(validIndex);
               setCounts(validCounts);
+              setIsProgressLoaded(true);
             }
-          } catch (e) {
-            console.error('Failed to parse local reading progress:', e);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to parse local reading progress:', e);
+      }
+
+      if (!localData && isSubscribed) {
+        setIsProgressLoaded(true);
+      }
+
+      // 2. Sync with server progress if authenticated user and server data is newer or local is missing
+      try {
+        const res = await getReadingProgress(reading.slug);
+        if (isSubscribed && res.success && res.data) {
+          const { activeIndex: serverIndex, counts: serverCounts, updatedAt: serverUpdatedAt } = res.data;
+
+          const localTime = localData?.updatedAt ? new Date(localData.updatedAt).getTime() : 0;
+          const serverTime = serverUpdatedAt ? new Date(serverUpdatedAt).getTime() : 0;
+
+          if (!localData || (serverTime > 0 && serverTime > localTime)) {
+            let validIndex = 0;
+            if (
+              typeof serverIndex === 'number' &&
+              serverIndex >= 0 &&
+              serverIndex < sections.length
+            ) {
+              validIndex = serverIndex;
+            }
+
+            const validCounts = new Array(sections.length).fill(0);
+            if (Array.isArray(serverCounts)) {
+              for (let i = 0; i < sections.length; i++) {
+                if (typeof serverCounts[i] === 'number') {
+                  validCounts[i] = serverCounts[i];
+                }
+              }
+            }
+
+            setActiveIndex(validIndex);
+            setCounts(validCounts);
+
+            try {
+              localStorage.setItem(
+                storageKey,
+                JSON.stringify({
+                  activeIndex: validIndex,
+                  counts: validCounts,
+                  updatedAt: serverUpdatedAt || new Date().toISOString(),
+                })
+              );
+            } catch (e) {
+              console.error('Failed to sync server progress to localStorage:', e);
+            }
           }
         }
       } catch (err) {
-        console.error('Error loading reading progress:', err);
+        console.error('Error loading reading progress from server:', err);
       } finally {
         if (isSubscribed) {
           setIsProgressLoaded(true);
@@ -130,14 +153,40 @@ export function ReadingView({ reading }: ReadingViewProps) {
     setIsTranslationExpanded(false);
   }, [activeIndex]);
 
-  // Auto-save progress on activeIndex or counts update
+  // Auto-save progress on activeIndex or counts update whenever state changes
+  useEffect(() => {
+    if (!isProgressLoaded || isCompleted || sections.length === 0) return;
+
+    const storageKey = `lembaran_progress_${reading.slug}`;
+
+    try {
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          activeIndex,
+          counts,
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    } catch (e) {
+      console.error('Failed to write to localStorage:', e);
+    }
+
+    saveReadingProgress({
+      readingSlug: reading.slug,
+      activeIndex,
+      counts,
+    }).catch((err) => {
+      console.error('Background progress save error:', err);
+    });
+  }, [activeIndex, counts, isProgressLoaded, isCompleted, reading.slug, sections.length]);
+
   const persistProgress = useCallback(
     (newIndex: number, newCounts: number[]) => {
       if (!isProgressLoaded || isCompleted || sections.length === 0) return;
 
       const storageKey = `lembaran_progress_${reading.slug}`;
 
-      // Save locally (for guest and fast local state)
       try {
         localStorage.setItem(
           storageKey,
@@ -151,7 +200,6 @@ export function ReadingView({ reading }: ReadingViewProps) {
         console.error('Failed to write to localStorage:', e);
       }
 
-      // Save to Supabase (background fire-and-forget for logged-in user)
       saveReadingProgress({
         readingSlug: reading.slug,
         activeIndex: newIndex,
