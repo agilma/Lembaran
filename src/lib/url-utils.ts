@@ -16,15 +16,11 @@ export function getAppOrigin(request?: Request): string {
   if (request) {
     const forwardedHost = request.headers.get("x-forwarded-host");
     const host = forwardedHost || request.headers.get("host");
-    const proto = request.headers.get("x-forwarded-proto") || "https";
+    const proto = request.headers.get("x-forwarded-proto") || "http";
 
     if (host) {
       const cleanHost = host.split(":")[0];
       if (cleanHost === "localhost" || cleanHost === "127.0.0.1") {
-        if (process.env.NODE_ENV === "development") {
-          return `${proto}://${host}`;
-        }
-      } else {
         return `${proto}://${host}`;
       }
     }
@@ -33,10 +29,6 @@ export function getAppOrigin(request?: Request): string {
   if (typeof window !== "undefined" && window.location.origin) {
     const origin = window.location.origin;
     if (origin.includes("localhost") || origin.includes("127.0.0.1")) {
-      if (process.env.NODE_ENV === "development") {
-        return origin;
-      }
-    } else {
       return origin;
     }
   }
