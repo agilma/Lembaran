@@ -9,6 +9,11 @@ import {
   saveReadingProgress,
   deleteReadingProgress,
 } from '@/app/actions/reading-actions';
+import {
+  SavedReadingProgress,
+  parseProgressData,
+  resolveReadingProgress,
+} from '@/lib/reading-progress';
 
 interface ReadingViewProps {
   reading: Reading;
@@ -38,84 +43,56 @@ export function ReadingView({ reading }: ReadingViewProps) {
     let isSubscribed = true;
 
     async function loadProgress() {
+      setIsProgressLoaded(false);
+
       if (sections.length === 0) {
-        setIsProgressLoaded(true);
+        if (isSubscribed) {
+          setIsProgressLoaded(true);
+        }
         return;
       }
 
       const storageKey = `lembaran_progress_${reading.slug}`;
 
+      // 1. Read progress from localStorage
+      let localProgress: SavedReadingProgress | null = null;
       try {
-        // Attempt to fetch saved progress from server (authenticated user)
-        const res = await getReadingProgress(reading.slug);
-
-        if (isSubscribed && res.success && res.data) {
-          const { activeIndex: savedIndex, counts: savedCounts } = res.data;
-          let validIndex = 0;
-          if (
-            typeof savedIndex === 'number' &&
-            savedIndex >= 0 &&
-            savedIndex < sections.length
-          ) {
-            validIndex = savedIndex;
-          }
-
-          const validCounts = new Array(sections.length).fill(0);
-          if (Array.isArray(savedCounts)) {
-            for (let i = 0; i < sections.length; i++) {
-              if (typeof savedCounts[i] === 'number') {
-                validCounts[i] = savedCounts[i];
-              }
-            }
-          }
-
-          setActiveIndex(validIndex);
-          setCounts(validCounts);
-          setIsProgressLoaded(true);
-          return;
-        }
-
-        // Fallback for guest or when no server progress exists
         const localDataString = localStorage.getItem(storageKey);
-        if (isSubscribed && localDataString) {
-          try {
-            const parsed = JSON.parse(localDataString);
-            if (parsed && typeof parsed === 'object') {
-              const savedIndex = parsed.activeIndex;
-              const savedCounts = parsed.counts;
+        if (localDataString) {
+          const parsed = JSON.parse(localDataString);
+          localProgress = parseProgressData(parsed, sections.length);
+        }
+      } catch (e) {
+        console.error('Failed to read or parse local reading progress:', e);
+      }
 
-              let validIndex = 0;
-              if (
-                typeof savedIndex === 'number' &&
-                savedIndex >= 0 &&
-                savedIndex < sections.length
-              ) {
-                validIndex = savedIndex;
-              }
-
-              const validCounts = new Array(sections.length).fill(0);
-              if (Array.isArray(savedCounts)) {
-                for (let i = 0; i < sections.length; i++) {
-                  if (typeof savedCounts[i] === 'number') {
-                    validCounts[i] = savedCounts[i];
-                  }
-                }
-              }
-
-              setActiveIndex(validIndex);
-              setCounts(validCounts);
-            }
-          } catch (e) {
-            console.error('Failed to parse local reading progress:', e);
-          }
+      // 2. Read progress from Supabase server (authenticated user)
+      let serverProgress: SavedReadingProgress | null = null;
+      try {
+        const res = await getReadingProgress(reading.slug);
+        if (res.success && res.data) {
+          serverProgress = parseProgressData(res.data, sections.length);
         }
       } catch (err) {
-        console.error('Error loading reading progress:', err);
-      } finally {
-        if (isSubscribed) {
-          setIsProgressLoaded(true);
-        }
+        console.error('Error fetching server reading progress:', err);
       }
+
+      if (!isSubscribed) return;
+
+      // 3. Determine which progress to use
+      const chosenProgress = resolveReadingProgress(localProgress, serverProgress);
+
+      // 4. Set activeIndex and counts
+      if (chosenProgress) {
+        setActiveIndex(chosenProgress.activeIndex);
+        setCounts(chosenProgress.counts);
+      } else {
+        setActiveIndex(0);
+        setCounts(new Array(sections.length).fill(0));
+      }
+
+      // 5. Mark hydration complete
+      setIsProgressLoaded(true);
     }
 
     loadProgress();
