@@ -22,18 +22,34 @@ describe("Authentication & Security Suite", () => {
       process.env.NEXT_PUBLIC_APP_URL = originalEnv;
     });
 
-    test("uses request x-forwarded-host header when available", () => {
+    test("uses request x-forwarded-host header when host is localhost", () => {
       const originalEnv = process.env.NEXT_PUBLIC_APP_URL;
       delete process.env.NEXT_PUBLIC_APP_URL;
 
       const mockRequest = new Request("http://internal-host/auth/callback", {
         headers: {
-          "x-forwarded-host": "lembaran.vercel.app",
+          "x-forwarded-host": "localhost:3000",
+          "x-forwarded-proto": "http",
+        },
+      });
+
+      assert.strictEqual(getAppOrigin(mockRequest), "http://localhost:3000");
+
+      process.env.NEXT_PUBLIC_APP_URL = originalEnv;
+    });
+
+    test("falls back to canonical production origin when host is preview deployment URL", () => {
+      const originalEnv = process.env.NEXT_PUBLIC_APP_URL;
+      delete process.env.NEXT_PUBLIC_APP_URL;
+
+      const mockPreviewRequest = new Request("https://lembaran-agil-mahendras-projects.vercel.app/auth/callback", {
+        headers: {
+          "x-forwarded-host": "lembaran-agil-mahendras-projects.vercel.app",
           "x-forwarded-proto": "https",
         },
       });
 
-      assert.strictEqual(getAppOrigin(mockRequest), "https://lembaran.vercel.app");
+      assert.strictEqual(getAppOrigin(mockPreviewRequest), "https://lembaran.vercel.app");
 
       process.env.NEXT_PUBLIC_APP_URL = originalEnv;
     });

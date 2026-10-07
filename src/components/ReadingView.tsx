@@ -226,9 +226,15 @@ export function ReadingView({ reading }: ReadingViewProps) {
         readingSlug: reading.slug,
         count: totalCount > 0 ? totalCount : null,
         target: totalTarget > 0 ? totalTarget : null,
-      }).catch((err) => {
-        console.error('Non-blocking persistence error:', err);
-      });
+      })
+        .then((res) => {
+          if (res && !res.success) {
+            console.error('Failed to record reading completion:', res.message);
+          }
+        })
+        .catch((err) => {
+          console.error('Non-blocking persistence error:', err);
+        });
 
       // 2. Clear saved active progress in Supabase and localStorage
       deleteReadingProgress(reading.slug).catch((err) => {
