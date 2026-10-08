@@ -74,20 +74,16 @@ export interface GetReadingHistoryResult {
   message?: string;
 }
 
+function maskUserId(userId: string | undefined): string {
+  if (!userId) return "none";
+  if (userId.length < 8) return "***";
+  return `${userId.slice(0, 4)}...${userId.slice(-4)}`;
+}
+
 export async function recordReadingCompletion(
   params: RecordCompletionParams
 ): Promise<RecordCompletionResult> {
   try {
-    const user = await getCurrentUser();
-
-    if (!user) {
-      return {
-        success: true,
-        message: "Reading completed as guest (unauthenticated).",
-        savedLocallyOrUnauthenticated: true,
-      };
-    }
-
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       console.warn("Supabase credentials not configured. Skipping server persistence.");
       return {
@@ -98,6 +94,19 @@ export async function recordReadingCompletion(
     }
 
     const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return {
+        success: true,
+        message: "Reading completed as guest (unauthenticated).",
+        savedLocallyOrUnauthenticated: true,
+      };
+    }
+
     const completedAt = new Date().toISOString();
 
     const { error } = await supabase.from("reading_completions").insert({
@@ -109,7 +118,11 @@ export async function recordReadingCompletion(
     });
 
     if (error) {
-      console.error("Failed to insert reading completion to Supabase:", error);
+      console.error("Failed to insert reading completion to Supabase:", {
+        code: error.code,
+        message: error.message,
+        userId: maskUserId(user.id),
+      });
       return {
         success: false,
         message: "Gagal menyimpan riwayat ke database.",
@@ -133,16 +146,20 @@ export async function getReadingProgress(
   readingSlug: string
 ): Promise<GetProgressResult> {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
-      return { success: true, data: null, message: "Unauthenticated user" };
-    }
-
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       return { success: true, data: null, message: "Supabase persistence not configured" };
     }
 
     const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return { success: true, data: null, message: "Unauthenticated user" };
+    }
+
     const { data, error } = await supabase
       .from("reading_progress")
       .select("active_index, counts, updated_at")
@@ -151,7 +168,11 @@ export async function getReadingProgress(
       .maybeSingle();
 
     if (error) {
-      console.error("Failed to fetch reading progress from Supabase:", error);
+      console.error("Failed to fetch reading progress from Supabase:", {
+        code: error.code,
+        message: error.message,
+        userId: maskUserId(user.id),
+      });
       return { success: false, data: null, message: "Error loading reading progress" };
     }
 
@@ -177,15 +198,6 @@ export async function saveReadingProgress(
   params: SaveProgressParams
 ): Promise<SaveProgressResult> {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
-      return {
-        success: true,
-        message: "User is guest/unauthenticated",
-        savedLocallyOrUnauthenticated: true,
-      };
-    }
-
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       return {
         success: true,
@@ -195,6 +207,19 @@ export async function saveReadingProgress(
     }
 
     const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return {
+        success: true,
+        message: "User is guest/unauthenticated",
+        savedLocallyOrUnauthenticated: true,
+      };
+    }
+
     const updatedAt = new Date().toISOString();
 
     const { error } = await supabase.from("reading_progress").upsert(
@@ -209,7 +234,11 @@ export async function saveReadingProgress(
     );
 
     if (error) {
-      console.error("Failed to save reading progress to Supabase:", error);
+      console.error("Failed to save reading progress to Supabase:", {
+        code: error.code,
+        message: error.message,
+        userId: maskUserId(user.id),
+      });
       return {
         success: false,
         message: "Gagal menyimpan progress ke database.",
@@ -233,15 +262,6 @@ export async function deleteReadingProgress(
   readingSlug: string
 ): Promise<SaveProgressResult> {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
-      return {
-        success: true,
-        message: "User is guest/unauthenticated",
-        savedLocallyOrUnauthenticated: true,
-      };
-    }
-
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       return {
         success: true,
@@ -251,6 +271,19 @@ export async function deleteReadingProgress(
     }
 
     const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return {
+        success: true,
+        message: "User is guest/unauthenticated",
+        savedLocallyOrUnauthenticated: true,
+      };
+    }
+
     const { error } = await supabase
       .from("reading_progress")
       .delete()
@@ -258,7 +291,11 @@ export async function deleteReadingProgress(
       .eq("reading_slug", readingSlug);
 
     if (error) {
-      console.error("Failed to delete reading progress from Supabase:", error);
+      console.error("Failed to delete reading progress from Supabase:", {
+        code: error.code,
+        message: error.message,
+        userId: maskUserId(user.id),
+      });
       return {
         success: false,
         message: "Gagal menghapus progress.",
@@ -280,17 +317,6 @@ export async function deleteReadingProgress(
 
 export async function getReadingHistory(): Promise<GetReadingHistoryResult> {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
-      return {
-        success: true,
-        completions: [],
-        summaries: [],
-        dateSummaries: [],
-        message: "Pengguna belum terautentikasi.",
-      };
-    }
-
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       return {
         success: true,
@@ -302,6 +328,21 @@ export async function getReadingHistory(): Promise<GetReadingHistoryResult> {
     }
 
     const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return {
+        success: true,
+        completions: [],
+        summaries: [],
+        dateSummaries: [],
+        message: "Pengguna belum terautentikasi.",
+      };
+    }
+
     const { data, error } = await supabase
       .from("reading_completions")
       .select("id, reading_slug, count, target, completed_at")
@@ -309,7 +350,11 @@ export async function getReadingHistory(): Promise<GetReadingHistoryResult> {
       .order("completed_at", { ascending: false });
 
     if (error) {
-      console.error("Failed to fetch reading history from Supabase:", error);
+      console.error("Failed to fetch reading history from Supabase:", {
+        code: error.code,
+        message: error.message,
+        userId: maskUserId(user.id),
+      });
       return {
         success: false,
         completions: [],
