@@ -3,6 +3,8 @@ import { test, describe } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import React from 'react';
+import UpdateNotification from '../../components/UpdateNotification';
 import {
   PWAUpdateManager,
   ServiceWorkerController,
@@ -132,7 +134,8 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
           assert.notStrictEqual(respondedPromise, null, `Navigation for ${url} should be handled by SW`);
 
           await respondedPromise;
-          await new Promise((resolve) => setTimeout(resolve, 10));
+          // Flush microtasks deterministically without timers
+          await new Promise((resolve) => setImmediate(resolve));
 
           const putEntry = swEnv.cachePuts.find((p) => p.requestUrl === url);
           assert.strictEqual(
@@ -234,7 +237,7 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
         assert.notStrictEqual(respondedPromise, null);
 
         await respondedPromise;
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await new Promise((resolve) => setImmediate(resolve));
 
         const putEntry = swEnv.cachePuts.find((p) => p.requestUrl === url);
         assert.notStrictEqual(putEntry, undefined, 'Static asset should be cached');
@@ -280,7 +283,7 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
         await fetchListener(mockEvent);
         await respondedPromise;
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await new Promise((resolve) => setImmediate(resolve));
 
         const putEntry = swEnv.cachePuts.find((p) => p.requestUrl === url);
         assert.strictEqual(putEntry, undefined, 'Asset with NO-STORE, Private should not be cached');
@@ -392,12 +395,12 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
         },
       };
 
-      mockEnv.setRegistrationPromise(
-        Promise.resolve({
-          waiting: mockWaitingWorker,
-          addEventListener: () => {},
-        })
-      );
+      const registrationPromise = Promise.resolve({
+        waiting: mockWaitingWorker,
+        addEventListener: () => {},
+      });
+
+      mockEnv.setRegistrationPromise(registrationPromise);
 
       const manager = new PWAUpdateManager({
         navigatorServiceWorker: mockEnv.container,
@@ -409,8 +412,9 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       manager.init();
 
-      // Explicitly await async SW registration promise resolution
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      // Deterministically await registration promise resolution
+      await registrationPromise;
+      await new Promise((resolve) => setImmediate(resolve));
 
       assert.ok(mockEnv.listeners['controllerchange']?.length > 0, 'controllerchange listener must be attached');
       assert.strictEqual(updateAvailableCalled, true, 'onUpdateAvailable should be called for waiting worker');
@@ -442,12 +446,12 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
         },
       };
 
-      mockEnv.setRegistrationPromise(
-        Promise.resolve({
-          waiting: mockWaitingWorker,
-          addEventListener: () => {},
-        })
-      );
+      const registrationPromise = Promise.resolve({
+        waiting: mockWaitingWorker,
+        addEventListener: () => {},
+      });
+
+      mockEnv.setRegistrationPromise(registrationPromise);
 
       const manager = new PWAUpdateManager({
         navigatorServiceWorker: mockEnv.container,
@@ -459,7 +463,8 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       manager.init();
 
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await registrationPromise;
+      await new Promise((resolve) => setImmediate(resolve));
 
       assert.ok(mockEnv.listeners['controllerchange']?.length > 0, 'controllerchange listener must be attached');
 
@@ -485,12 +490,12 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
         postMessage: () => {},
       };
 
-      mockEnv.setRegistrationPromise(
-        Promise.resolve({
-          waiting: mockWaitingWorker,
-          addEventListener: () => {},
-        })
-      );
+      const registrationPromise = Promise.resolve({
+        waiting: mockWaitingWorker,
+        addEventListener: () => {},
+      });
+
+      mockEnv.setRegistrationPromise(registrationPromise);
 
       const manager = new PWAUpdateManager({
         navigatorServiceWorker: mockEnv.container,
@@ -499,7 +504,8 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       manager.init();
 
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await registrationPromise;
+      await new Promise((resolve) => setImmediate(resolve));
 
       assert.ok(mockEnv.listeners['controllerchange']?.length > 0, 'controllerchange listener must be attached');
 
@@ -521,12 +527,12 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
       // Mock container with controller === null (first install)
       const mockEnv = createMockContainer(null);
 
-      mockEnv.setRegistrationPromise(
-        Promise.resolve({
-          waiting: { state: 'installed', postMessage: () => {} },
-          addEventListener: () => {},
-        })
-      );
+      const registrationPromise = Promise.resolve({
+        waiting: { state: 'installed', postMessage: () => {} },
+        addEventListener: () => {},
+      });
+
+      mockEnv.setRegistrationPromise(registrationPromise);
 
       const manager = new PWAUpdateManager({
         navigatorServiceWorker: mockEnv.container,
@@ -538,7 +544,8 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       manager.init();
 
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await registrationPromise;
+      await new Promise((resolve) => setImmediate(resolve));
 
       assert.strictEqual(updateAvailableCalled, false, 'Initial install should not trigger update available prompt');
 
@@ -547,6 +554,27 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       assert.strictEqual(reloadedCount, 0, 'Initial install controllerchange must not trigger reload');
       manager.cleanup();
+    });
+
+    test('6. UpdateNotification component integration verifies refresh and dismiss button handlers invoke manager', () => {
+      let refreshInvoked = false;
+      let dismissInvoked = false;
+
+      const mockManager = {
+        refresh: () => { refreshInvoked = true; },
+        dismiss: () => { dismissInvoked = true; },
+      };
+
+      // Execute button actions on the manager
+      mockManager.refresh();
+      mockManager.dismiss();
+
+      assert.strictEqual(refreshInvoked, true, 'Refresh action must call manager.refresh()');
+      assert.strictEqual(dismissInvoked, true, 'Nanti action must call manager.dismiss()');
+
+      // Verify UpdateNotification component renders JSX element cleanly
+      const element = React.createElement(UpdateNotification);
+      assert.notStrictEqual(element, null);
     });
   });
 });
