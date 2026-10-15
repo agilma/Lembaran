@@ -1,9 +1,8 @@
 const CACHE_PREFIX = 'lembaran-cache-';
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 
 const PRECACHE_ASSETS = [
-  '/',
   '/manifest.webmanifest',
   '/icon-192.png',
   '/icon-512.png',
@@ -19,19 +18,8 @@ const SENSITIVE_PATHS = [
   '/api',
 ];
 
-const PUBLIC_NAV_PATHS = [
-  '/',
-  '/bacaan',
-  '/reading',
-];
-
 function isSensitivePath(pathname) {
   return SENSITIVE_PATHS.some((path) => pathname === path || pathname.startsWith(path + '/'));
-}
-
-function isPublicNavPath(pathname) {
-  if (pathname === '/') return true;
-  return PUBLIC_NAV_PATHS.some((path) => pathname === path || pathname.startsWith(path + '/'));
 }
 
 self.addEventListener('install', (event) => {
@@ -87,44 +75,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 3. Navigation requests: Network-First with Cache Fallback strictly for public routes
+  // 3. Navigation requests: Network-Only with generic offline HTML fallback.
+  // HTML responses are never stored in Cache Storage to prevent caching user session HTML.
   if (request.mode === 'navigate') {
-    if (!isPublicNavPath(url.pathname)) {
-      return;
-    }
-
     event.respondWith(
-      fetch(request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const cacheControl = (networkResponse.headers.get('Cache-Control') || '').toLowerCase();
-            if (!cacheControl.includes('no-store') && !cacheControl.includes('private')) {
-              const responseClone = networkResponse.clone();
-              caches.open(CACHE_NAME).then((cache) => {
-                cache.put(request, responseClone);
-              });
-            }
+      fetch(request).catch(() => {
+        return new Response(
+          '<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"><title>Lembaran - Offline</title></head><body><p>Anda sedang offline. Halaman yang memerlukan koneksi internet atau autentikasi tidak dapat dibuka tanpa jaringan.</p></body></html>',
+          {
+            status: 503,
+            statusText: 'Service Unavailable',
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
           }
-          return networkResponse;
-        })
-        .catch(async () => {
-          const cachedResponse = await caches.match(request);
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          const rootCached = await caches.match('/');
-          if (rootCached) {
-            return rootCached;
-          }
-          return new Response(
-            '<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"><title>Lembaran - Offline</title></head><body><p>Anda sedang offline. Halaman yang memerlukan koneksi internet atau autentikasi tidak dapat dibuka tanpa jaringan.</p></body></html>',
-            {
-              status: 503,
-              statusText: 'Service Unavailable',
-              headers: { 'Content-Type': 'text/html; charset=utf-8' },
-            }
-          );
-        })
+        );
+      })
     );
     return;
   }

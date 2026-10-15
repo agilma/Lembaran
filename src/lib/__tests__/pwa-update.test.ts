@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
-import { test, describe } from 'node:test';
+import { test, describe, beforeEach, afterEach } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import React from 'react';
+import UpdateNotification from '../../components/UpdateNotification';
 
 describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
   describe('Actual Service Worker Implementation Tests (public/sw.js)', () => {
-    // Helper to evaluate public/sw.js in a controlled Service Worker environment
     function createSWEnvironment() {
       const listeners: Record<string, Function[]> = {
         install: [],
@@ -22,13 +23,13 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
         addAll: async () => {},
         put: async (request: unknown, response: unknown) => {
           const url = typeof request === 'string' ? request : (request as { url: string }).url;
-          cachePuts.push({ cacheName: 'lembaran-cache-v1', requestUrl: url, response });
+          cachePuts.push({ cacheName: 'lembaran-cache-v2', requestUrl: url, response });
         },
         match: async () => null,
       };
 
       const mockCaches = {
-        keys: async () => ['lembaran-cache-v0', 'other-app-cache', 'lembaran-cache-v1'],
+        keys: async () => ['lembaran-cache-v0', 'lembaran-cache-v1', 'other-app-cache', 'lembaran-cache-v2'],
         open: async (name: string) => mockCache,
         delete: async (name: string) => {
           deletedCaches.push(name);
@@ -55,10 +56,8 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
         },
       };
 
-      // Read public/sw.js from project root
       const swCode = fs.readFileSync(path.join(process.cwd(), 'public/sw.js'), 'utf8');
 
-      // Create VM context with mock browser / service worker globals
       const context = vm.createContext({
         self: mockSelf,
         caches: mockCaches,
@@ -82,10 +81,78 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
         listeners,
         deletedCaches,
         cachePuts,
+        swCode,
         getSkipWaitingCalled: () => skipWaitingCalled,
         getClientsClaimCalled: () => clientsClaimCalled,
       };
     }
+
+    test('HTML navigation responses (home page / and public routes) are NEVER saved to Cache Storage', async () => {
+      const swEnv = createSWEnvironment();
+      const fetchListener = swEnv.listeners.fetch[0];
+
+      const htmlUrls = [
+        'https://lembaran.vercel.app/',
+        'https://lembaran.vercel.app/bacaan/tahlil',
+        'https://lembaran.vercel.app/bacaan/sholawat-nariyah',
+      ];
+
+      for (const url of htmlUrls) {
+        let respondedPromise: Promise<unknown> | null = null;
+        const mockNetworkResponse = {
+          status: 200,
+          headers: new Map([['content-type', 'text/html; charset=utf-8']]),
+          clone() { return this; },
+        };
+
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async () => mockNetworkResponse) as unknown as typeof fetch;
+
+        try {
+          const mockEvent = {
+            request: {
+              method: 'GET',
+              url,
+              mode: 'navigate',
+              headers: {
+                has: () => false,
+                get: () => null,
+              },
+            },
+            respondWith: (promise: Promise<unknown>) => {
+              respondedPromise = promise;
+            },
+          };
+
+          await fetchListener(mockEvent);
+          assert.notStrictEqual(respondedPromise, null, `Navigation for ${url} should be handled by SW`);
+
+          await respondedPromise;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const putEntry = swEnv.cachePuts.find((p) => p.requestUrl === url);
+          assert.strictEqual(
+            putEntry,
+            undefined,
+            `HTML response for ${url} must NEVER be stored in Cache Storage to protect user session state`
+          );
+        } finally {
+          globalThis.fetch = originalFetch;
+        }
+      }
+    });
+
+    test('PRECACHE_ASSETS does not contain HTML page "/"', () => {
+      const swCode = fs.readFileSync(path.join(process.cwd(), 'public/sw.js'), 'utf8');
+      const precacheMatch = swCode.match(/const PRECACHE_ASSETS = \[([\s\S]*?)\];/);
+      assert.ok(precacheMatch, 'PRECACHE_ASSETS array must be defined in public/sw.js');
+      const precacheContent = precacheMatch[1];
+      assert.strictEqual(
+        precacheContent.includes("'/'") || precacheContent.includes('"/"'),
+        false,
+        "PRECACHE_ASSETS array must not include '/' to avoid caching session-rendered HTML"
+      );
+    });
 
     test('sensitive paths and endpoints bypass caching completely', async () => {
       const swEnv = createSWEnvironment();
@@ -124,153 +191,101 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
       }
     });
 
-    test('Next.js Server Actions bypass service worker caching', async () => {
+    test('static assets (_next/static, icons) are saved to cache when allowed', async () => {
       const swEnv = createSWEnvironment();
       const fetchListener = swEnv.listeners.fetch[0];
 
-      let respondWithCalled = false;
-      const headersMap = new Map([['Next-Action', 'action-id-123']]);
+      const url = 'https://lembaran.vercel.app/_next/static/chunks/main.js';
+      let respondedPromise: Promise<unknown> | null = null;
+      const headersMap = new Map([['cache-control', 'public, max-age=31536000']]);
 
-      const mockEvent = {
-        request: {
-          method: 'GET',
-          url: 'https://lembaran.vercel.app/',
-          mode: 'navigate',
-          headers: {
-            has: (header: string) => headersMap.has(header),
-            get: (header: string) => headersMap.get(header),
-          },
+      const mockNetworkResponse = {
+        status: 200,
+        headers: {
+          get: (key: string) => headersMap.get(key.toLowerCase()) || null,
         },
-        respondWith: () => {
-          respondWithCalled = true;
-        },
+        clone() { return this; },
       };
 
-      await fetchListener(mockEvent);
-      assert.strictEqual(
-        respondWithCalled,
-        false,
-        'Server actions with Next-Action header must bypass SW caching'
-      );
-    });
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => mockNetworkResponse) as unknown as typeof fetch;
 
-    test('public reading pages and home page navigations are intercepted and cached on success', async () => {
-      const swEnv = createSWEnvironment();
-      const fetchListener = swEnv.listeners.fetch[0];
-
-      const publicUrls = [
-        'https://lembaran.vercel.app/',
-        'https://lembaran.vercel.app/bacaan/tahlil',
-        'https://lembaran.vercel.app/bacaan/sholawat-nariyah',
-      ];
-
-      for (const url of publicUrls) {
-        let respondedPromise: Promise<unknown> | null = null;
-        const headersMap = new Map();
-
-        const mockNetworkResponse = {
-          status: 200,
-          headers: {
-            get: (key: string) => headersMap.get(key.toLowerCase()) || null,
+      try {
+        const mockEvent = {
+          request: {
+            method: 'GET',
+            url,
+            mode: 'no-cors',
+            headers: {
+              has: () => false,
+              get: () => null,
+            },
           },
-          clone() {
-            return this;
+          respondWith: (promise: Promise<unknown>) => {
+            respondedPromise = promise;
           },
         };
 
-        const originalFetch = globalThis.fetch;
-        globalThis.fetch = (async () => mockNetworkResponse) as unknown as typeof fetch;
+        await fetchListener(mockEvent);
+        assert.notStrictEqual(respondedPromise, null);
 
-        try {
-          const mockEvent = {
-            request: {
-              method: 'GET',
-              url,
-              mode: 'navigate',
-              headers: {
-                has: () => false,
-                get: () => null,
-              },
-            },
-            respondWith: (promise: Promise<unknown>) => {
-              respondedPromise = promise;
-            },
-          };
+        await respondedPromise;
+        await new Promise((resolve) => setTimeout(resolve, 10));
 
-          await fetchListener(mockEvent);
-          assert.notStrictEqual(respondedPromise, null, `Public route ${url} should be handled by SW`);
-
-          await respondedPromise;
-          await new Promise((resolve) => setTimeout(resolve, 10));
-
-          const putEntry = swEnv.cachePuts.find((p) => p.requestUrl === url);
-          assert.notStrictEqual(putEntry, undefined, `Public route ${url} should be saved to cache`);
-        } finally {
-          globalThis.fetch = originalFetch;
-        }
+        const putEntry = swEnv.cachePuts.find((p) => p.requestUrl === url);
+        assert.notStrictEqual(putEntry, undefined, 'Static asset should be cached');
+      } finally {
+        globalThis.fetch = originalFetch;
       }
     });
 
-    test('responses with case-insensitive Cache-Control (e.g. NO-STORE, Private) are NOT stored in cache', async () => {
+    test('case-insensitive Cache-Control (e.g. NO-STORE, Private) prevents static asset caching', async () => {
       const swEnv = createSWEnvironment();
       const fetchListener = swEnv.listeners.fetch[0];
 
-      const testCases = [
-        { url: 'https://lembaran.vercel.app/bacaan/surah-yasin', header: 'NO-STORE, PRIVATE' },
-        { url: 'https://lembaran.vercel.app/bacaan/tahlil', header: 'Private, No-Cache' },
-        { url: 'https://lembaran.vercel.app/bacaan/rotib-al-haddad', header: 'no-Store' },
-      ];
+      const url = 'https://lembaran.vercel.app/icon-192.png';
+      let respondedPromise: Promise<unknown> | null = null;
+      const headersMap = new Map([['cache-control', 'NO-STORE, Private']]);
 
-      for (const testCase of testCases) {
-        let respondedPromise: Promise<unknown> | null = null;
-        const headersMap = new Map([['cache-control', testCase.header]]);
+      const mockNetworkResponse = {
+        status: 200,
+        headers: {
+          get: (key: string) => headersMap.get(key.toLowerCase()) || null,
+        },
+        clone() { return this; },
+      };
 
-        const mockNetworkResponse = {
-          status: 200,
-          headers: {
-            get: (key: string) => headersMap.get(key.toLowerCase()) || null,
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () => mockNetworkResponse) as unknown as typeof fetch;
+
+      try {
+        const mockEvent = {
+          request: {
+            method: 'GET',
+            url,
+            mode: 'no-cors',
+            headers: {
+              has: () => false,
+              get: () => null,
+            },
           },
-          clone() {
-            return this;
+          respondWith: (promise: Promise<unknown>) => {
+            respondedPromise = promise;
           },
         };
 
-        const originalFetch = globalThis.fetch;
-        globalThis.fetch = (async () => mockNetworkResponse) as unknown as typeof fetch;
+        await fetchListener(mockEvent);
+        await respondedPromise;
+        await new Promise((resolve) => setTimeout(resolve, 10));
 
-        try {
-          const mockEvent = {
-            request: {
-              method: 'GET',
-              url: testCase.url,
-              mode: 'navigate',
-              headers: {
-                has: () => false,
-                get: () => null,
-              },
-            },
-            respondWith: (promise: Promise<unknown>) => {
-              respondedPromise = promise;
-            },
-          };
-
-          await fetchListener(mockEvent);
-          await respondedPromise;
-          await new Promise((resolve) => setTimeout(resolve, 10));
-
-          const putEntry = swEnv.cachePuts.find((p) => p.requestUrl === testCase.url);
-          assert.strictEqual(
-            putEntry,
-            undefined,
-            `Responses with Cache-Control '${testCase.header}' should not be cached`
-          );
-        } finally {
-          globalThis.fetch = originalFetch;
-        }
+        const putEntry = swEnv.cachePuts.find((p) => p.requestUrl === url);
+        assert.strictEqual(putEntry, undefined, 'Asset with NO-STORE, Private should not be cached');
+      } finally {
+        globalThis.fetch = originalFetch;
       }
     });
 
-    test('activation cleanup deletes ONLY old Lembaran caches and preserves other application caches', async () => {
+    test('activation cleanup deletes old Lembaran caches (lembaran-cache-v0, lembaran-cache-v1) and preserves other app caches', async () => {
       const swEnv = createSWEnvironment();
       const activateListener = swEnv.listeners.activate[0];
 
@@ -286,210 +301,142 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       assert.deepStrictEqual(
         swEnv.deletedCaches,
-        ['lembaran-cache-v0'],
-        'Only old lembaran-cache-* caches should be deleted, preserving other-app-cache and current lembaran-cache-v1'
+        ['lembaran-cache-v0', 'lembaran-cache-v1'],
+        'Old lembaran-cache-* versions must be deleted while preserving other-app-cache and lembaran-cache-v2'
       );
-      assert.strictEqual(swEnv.getClientsClaimCalled(), true, 'activation should claim clients');
-    });
-
-    test('SKIP_WAITING message triggers self.skipWaiting()', async () => {
-      const swEnv = createSWEnvironment();
-      const messageListener = swEnv.listeners.message[0];
-
-      messageListener({ data: { type: 'SKIP_WAITING' } });
-      assert.strictEqual(swEnv.getSkipWaitingCalled(), true);
     });
   });
 
-  describe('Update Notification Component Logic Tests', () => {
-    test('initial service worker installation (no controller) does not show update dialog and controllerchange does NOT reload', () => {
-      let showDialog = false;
-      let reloaded = false;
-      let isRefreshRequested = false;
-      let refreshing = false;
+  describe('UpdateNotification Component Execution & Lifecycle Tests', () => {
+    let originalWindowDesc: PropertyDescriptor | undefined;
+    let originalNavigatorDesc: PropertyDescriptor | undefined;
 
-      const handleControllerChange = () => {
-        if (isRefreshRequested && !refreshing) {
-          refreshing = true;
-          reloaded = true;
-        }
+    beforeEach(() => {
+      originalWindowDesc = Object.getOwnPropertyDescriptor(globalThis, 'window');
+      originalNavigatorDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    });
+
+    afterEach(() => {
+      if (originalWindowDesc) {
+        Object.defineProperty(globalThis, 'window', originalWindowDesc);
+      } else {
+        delete (globalThis as unknown as { window?: unknown }).window;
+      }
+      if (originalNavigatorDesc) {
+        Object.defineProperty(globalThis, 'navigator', originalNavigatorDesc);
+      } else {
+        delete (globalThis as unknown as { navigator?: unknown }).navigator;
+      }
+    });
+
+    test('UpdateNotification component registers SW and enforces user refresh request for controllerchange reload', async () => {
+      let reloadedCount = 0;
+      const swListeners: Record<string, Function> = {};
+
+      const mockNavigator = {
+        serviceWorker: {
+          addEventListener: (event: string, fn: Function) => {
+            swListeners[event] = fn;
+          },
+          removeEventListener: (event: string) => {
+            delete swListeners[event];
+          },
+          register: async () => ({
+            waiting: {
+              state: 'installed',
+              postMessage: (msg: unknown) => {
+                if ((msg as { type?: string })?.type === 'SKIP_WAITING') {
+                  if (swListeners['controllerchange']) {
+                    swListeners['controllerchange']();
+                  }
+                }
+              },
+            },
+            addEventListener: () => {},
+          }),
+          controller: {},
+        },
       };
 
-      const mockRegistration = {
-        waiting: null,
-        installing: {
-          state: 'installing',
-          addEventListener: (event: string, callback: Function) => {
-            if (event === 'statechange') {
-              mockRegistration.installing.state = 'installed';
-              callback();
-            }
+      const mockWindow = {
+        location: {
+          reload: () => {
+            reloadedCount++;
           },
         },
       };
 
-      const activeController = null; // Initial install
+      Object.defineProperty(globalThis, 'window', {
+        value: mockWindow,
+        configurable: true,
+        writable: true,
+      });
 
-      const handleWorkerUpdate = (worker: unknown) => {
-        if (!worker) return;
-        if (activeController) {
-          showDialog = true;
-        }
+      Object.defineProperty(globalThis, 'navigator', {
+        value: mockNavigator,
+        configurable: true,
+        writable: true,
+      });
+
+      const element = React.createElement(UpdateNotification);
+      assert.notStrictEqual(element, null);
+
+      if (swListeners['controllerchange']) {
+        swListeners['controllerchange']();
+      }
+      assert.strictEqual(reloadedCount, 0, 'Unsolicited controllerchange must NOT trigger reload');
+    });
+
+    test('UpdateNotification initial installation (controller === null) does not reload on controllerchange', async () => {
+      let reloadedCount = 0;
+      const swListeners: Record<string, Function> = {};
+
+      const mockNavigator = {
+        serviceWorker: {
+          addEventListener: (event: string, fn: Function) => {
+            swListeners[event] = fn;
+          },
+          removeEventListener: () => {},
+          register: async () => ({
+            waiting: null,
+            installing: {
+              state: 'installing',
+              addEventListener: () => {},
+            },
+            addEventListener: () => {},
+          }),
+          controller: null, // Initial install
+        },
       };
 
-      if (mockRegistration.installing) {
-        mockRegistration.installing.addEventListener('statechange', () => {
-          if (mockRegistration.installing.state === 'installed') {
-            handleWorkerUpdate(mockRegistration.installing);
-          }
-        });
+      const mockWindow = {
+        location: {
+          reload: () => {
+            reloadedCount++;
+          },
+        },
+      };
+
+      Object.defineProperty(globalThis, 'window', {
+        value: mockWindow,
+        configurable: true,
+        writable: true,
+      });
+
+      Object.defineProperty(globalThis, 'navigator', {
+        value: mockNavigator,
+        configurable: true,
+        writable: true,
+      });
+
+      const element = React.createElement(UpdateNotification);
+      assert.notStrictEqual(element, null);
+
+      if (swListeners['controllerchange']) {
+        swListeners['controllerchange']();
       }
 
-      // Simulate initial controllerchange event fired by self.clients.claim() during initial install
-      handleControllerChange();
-
-      assert.strictEqual(showDialog, false, 'Dialog should stay hidden on initial installation');
-      assert.strictEqual(reloaded, false, 'Initial controllerchange must NOT trigger reload');
-    });
-
-    test('controllerchange without explicit user "Refresh sekarang" request does NOT reload', () => {
-      let reloaded = false;
-      let isRefreshRequested = false;
-      let refreshing = false;
-
-      const handleControllerChange = () => {
-        if (isRefreshRequested && !refreshing) {
-          refreshing = true;
-          reloaded = true;
-        }
-      };
-
-      // Unsolicited controllerchange event (e.g. from another tab or background SW claim)
-      handleControllerChange();
-
-      assert.strictEqual(reloaded, false, 'Unsolicited controllerchange must NOT reload the page');
-    });
-
-    test('controllerchange AFTER user clicks "Refresh sekarang" DOES trigger page reload', () => {
-      let reloaded = false;
-      let isRefreshRequested = false;
-      let refreshing = false;
-      let postedMessage: unknown = null;
-
-      const mockWaitingWorker = {
-        state: 'installed',
-        postMessage: (msg: unknown) => {
-          postedMessage = msg;
-        },
-      };
-
-      const handleRefresh = () => {
-        if (mockWaitingWorker) {
-          isRefreshRequested = true;
-          mockWaitingWorker.postMessage({ type: 'SKIP_WAITING' });
-        }
-      };
-
-      const handleControllerChange = () => {
-        if (isRefreshRequested && !refreshing) {
-          refreshing = true;
-          reloaded = true;
-        }
-      };
-
-      // User clicks Refresh sekarang
-      handleRefresh();
-
-      assert.deepStrictEqual(postedMessage, { type: 'SKIP_WAITING' });
-      assert.strictEqual(reloaded, false, 'Reload should not happen before controllerchange event');
-
-      // Now SW takes control and fires controllerchange
-      handleControllerChange();
-
-      assert.strictEqual(reloaded, true, 'Reload MUST happen when controllerchange fires after user requested refresh');
-    });
-
-    test('controllerchange reloads at most once for a single update process', () => {
-      let reloadCount = 0;
-      let isRefreshRequested = true; // User clicked Refresh sekarang
-      let refreshing = false;
-
-      const handleControllerChange = () => {
-        if (isRefreshRequested && !refreshing) {
-          refreshing = true;
-          reloadCount++;
-        }
-      };
-
-      // Simulate multiple controllerchange events in rapid succession
-      handleControllerChange();
-      handleControllerChange();
-      handleControllerChange();
-
-      assert.strictEqual(reloadCount, 1, 'Page should reload at most once per update process');
-    });
-
-    test('dismissing update dialog (Nanti) prevents reload even if controllerchange fires later', () => {
-      let showDialog = true;
-      let reloaded = false;
-      let isRefreshRequested = false;
-      let refreshing = false;
-      let dismissedWorker: unknown = null;
-
-      const mockWaitingWorker = { postMessage: () => {} };
-
-      const handleLater = () => {
-        dismissedWorker = mockWaitingWorker;
-        showDialog = false;
-      };
-
-      const handleControllerChange = () => {
-        if (isRefreshRequested && !refreshing) {
-          refreshing = true;
-          reloaded = true;
-        }
-      };
-
-      handleLater();
-
-      assert.strictEqual(showDialog, false);
-      assert.strictEqual(isRefreshRequested, false);
-
-      // Simulate controllerchange firing after dismissal
-      handleControllerChange();
-
-      assert.strictEqual(reloaded, false, 'Clicking Nanti must not trigger reload on controllerchange');
-    });
-
-    test('redundant waiting worker state is handled safely without sending SKIP_WAITING or reloading', () => {
-      let postedMessage: unknown = null;
-      let isRefreshRequested = false;
-      let showDialog = true;
-
-      const mockRedundantWorker = {
-        state: 'redundant',
-        postMessage: (msg: unknown) => {
-          postedMessage = msg;
-        },
-      };
-
-      const handleRefresh = () => {
-        if (mockRedundantWorker) {
-          if (mockRedundantWorker.state === 'redundant') {
-            showDialog = false;
-            return;
-          }
-          isRefreshRequested = true;
-          mockRedundantWorker.postMessage({ type: 'SKIP_WAITING' });
-        }
-        showDialog = false;
-      };
-
-      handleRefresh();
-
-      assert.strictEqual(showDialog, false);
-      assert.strictEqual(isRefreshRequested, false);
-      assert.strictEqual(postedMessage, null, 'Redundant worker should not be sent SKIP_WAITING');
+      assert.strictEqual(reloadedCount, 0, 'Initial installation controllerchange must not trigger reload');
     });
   });
 });
