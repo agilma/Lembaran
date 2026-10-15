@@ -6,6 +6,7 @@ export default function UpdateNotification() {
   const [showDialog, setShowDialog] = useState<boolean>(false);
   const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
   const refreshingRef = useRef<boolean>(false);
+  const isRefreshRequestedRef = useRef<boolean>(false);
   const dismissedWorkerRef = useRef<ServiceWorker | null>(null);
 
   useEffect(() => {
@@ -15,9 +16,9 @@ export default function UpdateNotification() {
 
     let isSubscribed = true;
 
-    // Reload page when the new Service Worker takes control
+    // Reload page when the new Service Worker takes control ONLY IF user explicitly requested refresh
     const handleControllerChange = () => {
-      if (!refreshingRef.current) {
+      if (isRefreshRequestedRef.current && !refreshingRef.current) {
         refreshingRef.current = true;
         window.location.reload();
       }
@@ -77,6 +78,7 @@ export default function UpdateNotification() {
         setShowDialog(false);
         return;
       }
+      isRefreshRequestedRef.current = true;
       waitingWorker.postMessage({ type: 'SKIP_WAITING' });
     }
     setShowDialog(false);

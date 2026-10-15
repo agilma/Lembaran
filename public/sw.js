@@ -97,7 +97,7 @@ self.addEventListener('fetch', (event) => {
       fetch(request)
         .then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
-            const cacheControl = networkResponse.headers.get('Cache-Control') || '';
+            const cacheControl = (networkResponse.headers.get('Cache-Control') || '').toLowerCase();
             if (!cacheControl.includes('no-store') && !cacheControl.includes('private')) {
               const responseClone = networkResponse.clone();
               caches.open(CACHE_NAME).then((cache) => {
@@ -140,7 +140,7 @@ self.addEventListener('fetch', (event) => {
         const fetchPromise = fetch(request)
           .then((networkResponse) => {
             if (networkResponse && networkResponse.status === 200) {
-              const cacheControl = networkResponse.headers.get('Cache-Control') || '';
+              const cacheControl = (networkResponse.headers.get('Cache-Control') || '').toLowerCase();
               if (!cacheControl.includes('no-store') && !cacheControl.includes('private')) {
                 const responseClone = networkResponse.clone();
                 caches.open(CACHE_NAME).then((cache) => {

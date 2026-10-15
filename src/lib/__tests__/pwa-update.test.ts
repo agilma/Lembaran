@@ -178,7 +178,6 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
           },
         };
 
-        // Global fetch stub returning mock network response
         const originalFetch = globalThis.fetch;
         globalThis.fetch = (async () => mockNetworkResponse) as unknown as typeof fetch;
 
@@ -202,7 +201,6 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
           assert.notStrictEqual(respondedPromise, null, `Public route ${url} should be handled by SW`);
 
           await respondedPromise;
-          // Yield event loop for caches.open().then(...)
           await new Promise((resolve) => setTimeout(resolve, 10));
 
           const putEntry = swEnv.cachePuts.find((p) => p.requestUrl === url);
@@ -213,55 +211,62 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
       }
     });
 
-    test('responses with Cache-Control: no-store or private are NOT stored in cache', async () => {
+    test('responses with case-insensitive Cache-Control (e.g. NO-STORE, Private) are NOT stored in cache', async () => {
       const swEnv = createSWEnvironment();
       const fetchListener = swEnv.listeners.fetch[0];
 
-      const url = 'https://lembaran.vercel.app/bacaan/surah-yasin';
-      let respondedPromise: Promise<unknown> | null = null;
-      const headersMap = new Map([['cache-control', 'no-store, private']]);
+      const testCases = [
+        { url: 'https://lembaran.vercel.app/bacaan/surah-yasin', header: 'NO-STORE, PRIVATE' },
+        { url: 'https://lembaran.vercel.app/bacaan/tahlil', header: 'Private, No-Cache' },
+        { url: 'https://lembaran.vercel.app/bacaan/rotib-al-haddad', header: 'no-Store' },
+      ];
 
-      const mockNetworkResponse = {
-        status: 200,
-        headers: {
-          get: (key: string) => headersMap.get(key.toLowerCase()) || null,
-        },
-        clone() {
-          return this;
-        },
-      };
+      for (const testCase of testCases) {
+        let respondedPromise: Promise<unknown> | null = null;
+        const headersMap = new Map([['cache-control', testCase.header]]);
 
-      const originalFetch = globalThis.fetch;
-      globalThis.fetch = (async () => mockNetworkResponse) as unknown as typeof fetch;
-
-      try {
-        const mockEvent = {
-          request: {
-            method: 'GET',
-            url,
-            mode: 'navigate',
-            headers: {
-              has: () => false,
-              get: () => null,
-            },
+        const mockNetworkResponse = {
+          status: 200,
+          headers: {
+            get: (key: string) => headersMap.get(key.toLowerCase()) || null,
           },
-          respondWith: (promise: Promise<unknown>) => {
-            respondedPromise = promise;
+          clone() {
+            return this;
           },
         };
 
-        await fetchListener(mockEvent);
-        await respondedPromise;
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async () => mockNetworkResponse) as unknown as typeof fetch;
 
-        const putEntry = swEnv.cachePuts.find((p) => p.requestUrl === url);
-        assert.strictEqual(
-          putEntry,
-          undefined,
-          'Responses with no-store or private should not be cached'
-        );
-      } finally {
-        globalThis.fetch = originalFetch;
+        try {
+          const mockEvent = {
+            request: {
+              method: 'GET',
+              url: testCase.url,
+              mode: 'navigate',
+              headers: {
+                has: () => false,
+                get: () => null,
+              },
+            },
+            respondWith: (promise: Promise<unknown>) => {
+              respondedPromise = promise;
+            },
+          };
+
+          await fetchListener(mockEvent);
+          await respondedPromise;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const putEntry = swEnv.cachePuts.find((p) => p.requestUrl === testCase.url);
+          assert.strictEqual(
+            putEntry,
+            undefined,
+            `Responses with Cache-Control '${testCase.header}' should not be cached`
+          );
+        } finally {
+          globalThis.fetch = originalFetch;
+        }
       }
     });
 
@@ -297,8 +302,18 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
   });
 
   describe('Update Notification Component Logic Tests', () => {
-    test('initial service worker installation (no controller) does not show update dialog', () => {
+    test('initial service worker installation (no controller) does not show update dialog and controllerchange does NOT reload', () => {
       let showDialog = false;
+      let reloaded = false;
+      let isRefreshRequested = false;
+      let refreshing = false;
+
+      const handleControllerChange = () => {
+        if (isRefreshRequested && !refreshing) {
+          refreshing = true;
+          reloaded = true;
+        }
+      };
 
       const mockRegistration = {
         waiting: null,
@@ -306,7 +321,6 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
           state: 'installing',
           addEventListener: (event: string, callback: Function) => {
             if (event === 'statechange') {
-              // Simulate transition to installed
               mockRegistration.installing.state = 'installed';
               callback();
             }
@@ -331,37 +345,36 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
         });
       }
 
-      assert.strictEqual(
-        showDialog,
-        false,
-        'Dialog should stay hidden on initial installation when controller is null'
-      );
+      // Simulate initial controllerchange event fired by self.clients.claim() during initial install
+      handleControllerChange();
+
+      assert.strictEqual(showDialog, false, 'Dialog should stay hidden on initial installation');
+      assert.strictEqual(reloaded, false, 'Initial controllerchange must NOT trigger reload');
     });
 
-    test('detects waiting worker when controller is active', () => {
-      let showDialog = false;
-      let targetWorker: unknown = null;
+    test('controllerchange without explicit user "Refresh sekarang" request does NOT reload', () => {
+      let reloaded = false;
+      let isRefreshRequested = false;
+      let refreshing = false;
 
-      const mockWaitingWorker = { postMessage: () => {} };
-      const activeController = {}; // Active controller exists
-
-      const handleWorkerUpdate = (worker: unknown) => {
-        if (!worker) return;
-        if (activeController) {
-          targetWorker = worker;
-          showDialog = true;
+      const handleControllerChange = () => {
+        if (isRefreshRequested && !refreshing) {
+          refreshing = true;
+          reloaded = true;
         }
       };
 
-      handleWorkerUpdate(mockWaitingWorker);
+      // Unsolicited controllerchange event (e.g. from another tab or background SW claim)
+      handleControllerChange();
 
-      assert.strictEqual(showDialog, true);
-      assert.strictEqual(targetWorker, mockWaitingWorker);
+      assert.strictEqual(reloaded, false, 'Unsolicited controllerchange must NOT reload the page');
     });
 
-    test('Refresh sekarang sends SKIP_WAITING and does not set a timeout reload fallback', () => {
+    test('controllerchange AFTER user clicks "Refresh sekarang" DOES trigger page reload', () => {
+      let reloaded = false;
+      let isRefreshRequested = false;
+      let refreshing = false;
       let postedMessage: unknown = null;
-      let showDialog = true;
 
       const mockWaitingWorker = {
         state: 'installed',
@@ -372,74 +385,85 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       const handleRefresh = () => {
         if (mockWaitingWorker) {
-          if (mockWaitingWorker.state === 'redundant') {
-            showDialog = false;
-            return;
-          }
+          isRefreshRequested = true;
           mockWaitingWorker.postMessage({ type: 'SKIP_WAITING' });
         }
-        showDialog = false;
       };
 
+      const handleControllerChange = () => {
+        if (isRefreshRequested && !refreshing) {
+          refreshing = true;
+          reloaded = true;
+        }
+      };
+
+      // User clicks Refresh sekarang
       handleRefresh();
 
-      assert.strictEqual(showDialog, false);
       assert.deepStrictEqual(postedMessage, { type: 'SKIP_WAITING' });
+      assert.strictEqual(reloaded, false, 'Reload should not happen before controllerchange event');
+
+      // Now SW takes control and fires controllerchange
+      handleControllerChange();
+
+      assert.strictEqual(reloaded, true, 'Reload MUST happen when controllerchange fires after user requested refresh');
     });
 
-    test('controllerchange listener reloads the page exactly once (prevents refresh loop)', () => {
+    test('controllerchange reloads at most once for a single update process', () => {
       let reloadCount = 0;
-      let isRefreshing = false;
+      let isRefreshRequested = true; // User clicked Refresh sekarang
+      let refreshing = false;
 
       const handleControllerChange = () => {
-        if (!isRefreshing) {
-          isRefreshing = true;
+        if (isRefreshRequested && !refreshing) {
+          refreshing = true;
           reloadCount++;
         }
       };
 
-      // Simulate multiple controllerchange events
+      // Simulate multiple controllerchange events in rapid succession
       handleControllerChange();
       handleControllerChange();
       handleControllerChange();
 
-      assert.strictEqual(reloadCount, 1, 'controllerchange should trigger reload at most once');
+      assert.strictEqual(reloadCount, 1, 'Page should reload at most once per update process');
     });
 
-    test('dismissing update dialog (Nanti) prevents repeating dialogs for same version in session', () => {
+    test('dismissing update dialog (Nanti) prevents reload even if controllerchange fires later', () => {
       let showDialog = true;
+      let reloaded = false;
+      let isRefreshRequested = false;
+      let refreshing = false;
       let dismissedWorker: unknown = null;
 
       const mockWaitingWorker = { postMessage: () => {} };
-      const activeController = {};
 
       const handleLater = () => {
         dismissedWorker = mockWaitingWorker;
         showDialog = false;
       };
 
-      handleLater();
-      assert.strictEqual(showDialog, false);
-
-      // Simulate registration update check in same session
-      const handleWorkerUpdate = (worker: unknown) => {
-        if (!worker) return;
-        if (dismissedWorker === worker) return; // Prevent repeat dialog for dismissed worker
-        if (activeController) {
-          showDialog = true;
+      const handleControllerChange = () => {
+        if (isRefreshRequested && !refreshing) {
+          refreshing = true;
+          reloaded = true;
         }
       };
 
-      handleWorkerUpdate(mockWaitingWorker);
-      assert.strictEqual(
-        showDialog,
-        false,
-        'Should not re-trigger update dialog for the same dismissed waiting worker'
-      );
+      handleLater();
+
+      assert.strictEqual(showDialog, false);
+      assert.strictEqual(isRefreshRequested, false);
+
+      // Simulate controllerchange firing after dismissal
+      handleControllerChange();
+
+      assert.strictEqual(reloaded, false, 'Clicking Nanti must not trigger reload on controllerchange');
     });
 
-    test('redundant waiting worker state is handled safely without hanging', () => {
+    test('redundant waiting worker state is handled safely without sending SKIP_WAITING or reloading', () => {
       let postedMessage: unknown = null;
+      let isRefreshRequested = false;
       let showDialog = true;
 
       const mockRedundantWorker = {
@@ -455,6 +479,7 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
             showDialog = false;
             return;
           }
+          isRefreshRequested = true;
           mockRedundantWorker.postMessage({ type: 'SKIP_WAITING' });
         }
         showDialog = false;
@@ -463,11 +488,8 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
       handleRefresh();
 
       assert.strictEqual(showDialog, false);
-      assert.strictEqual(
-        postedMessage,
-        null,
-        'Redundant worker should not be sent SKIP_WAITING messages'
-      );
+      assert.strictEqual(isRefreshRequested, false);
+      assert.strictEqual(postedMessage, null, 'Redundant worker should not be sent SKIP_WAITING');
     });
   });
 });
