@@ -1,94 +1,48 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { PWAUpdateManager } from '@/lib/pwa-update';
 
 export default function UpdateNotification() {
   const [showDialog, setShowDialog] = useState<boolean>(false);
-  const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
-  const refreshingRef = useRef<boolean>(false);
-  const isRefreshRequestedRef = useRef<boolean>(false);
-  const dismissedWorkerRef = useRef<ServiceWorker | null>(null);
+  const managerRef = useRef<PWAUpdateManager | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
       return;
     }
 
-    let isSubscribed = true;
+    const manager = new PWAUpdateManager({
+      onUpdateAvailable: () => {
+        setShowDialog(true);
+      },
+      onUpdateDismissed: () => {
+        setShowDialog(false);
+      },
+    });
 
-    // Reload page when the new Service Worker takes control ONLY IF user explicitly requested refresh
-    const handleControllerChange = () => {
-      if (isRefreshRequestedRef.current && !refreshingRef.current) {
-        refreshingRef.current = true;
-        window.location.reload();
-      }
-    };
-
-    navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
-
-    navigator.serviceWorker
-      .register('/sw.js')
-      .then((registration) => {
-        if (!isSubscribed) return;
-
-        const handleWorkerUpdate = (worker: ServiceWorker | null) => {
-          if (!worker) return;
-          // Do not prompt if this worker instance was already dismissed by the user in this session
-          if (dismissedWorkerRef.current === worker) return;
-          // Only show update dialog if there is an active controller (i.e. not the initial installation)
-          if (navigator.serviceWorker.controller && isSubscribed) {
-            setWaitingWorker(worker);
-            setShowDialog(true);
-          }
-        };
-
-        // Check if there is already a waiting worker upon registration
-        if (registration.waiting) {
-          handleWorkerUpdate(registration.waiting);
-        }
-
-        // Listen for updates in installation state
-        registration.addEventListener('updatefound', () => {
-          const installingWorker = registration.installing;
-          if (!installingWorker) return;
-
-          installingWorker.addEventListener('statechange', () => {
-            if (
-              installingWorker.state === 'installed' &&
-              isSubscribed
-            ) {
-              handleWorkerUpdate(installingWorker);
-            }
-          });
-        });
-      })
-      .catch((error) => {
-        console.error('Service Worker registration failed:', error);
-      });
+    managerRef.current = manager;
+    manager.init();
 
     return () => {
-      isSubscribed = false;
-      navigator.serviceWorker.removeEventListener('controllerchange', handleControllerChange);
+      manager.cleanup();
     };
   }, []);
 
   const handleRefresh = () => {
-    if (waitingWorker) {
-      if (waitingWorker.state === 'redundant') {
-        setShowDialog(false);
-        return;
-      }
-      isRefreshRequestedRef.current = true;
-      waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+    if (managerRef.current) {
+      managerRef.current.refresh();
+    } else {
+      setShowDialog(false);
     }
-    setShowDialog(false);
   };
 
   const handleLater = () => {
-    if (waitingWorker) {
-      dismissedWorkerRef.current = waitingWorker;
+    if (managerRef.current) {
+      managerRef.current.dismiss();
+    } else {
+      setShowDialog(false);
     }
-    setShowDialog(false);
   };
 
   if (!showDialog) {

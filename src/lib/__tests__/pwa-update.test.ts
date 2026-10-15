@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
-import { test, describe, beforeEach, afterEach } from 'node:test';
+import { test, describe } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import React from 'react';
-import UpdateNotification from '../../components/UpdateNotification';
+import {
+  PWAUpdateManager,
+  ServiceWorkerController,
+  ServiceWorkerRegistrationLike,
+  ServiceWorkerContainerLike,
+} from '../pwa-update';
 
 describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
   describe('Actual Service Worker Implementation Tests (public/sw.js)', () => {
@@ -307,411 +311,235 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
     });
   });
 
-  describe('UpdateNotification Component Execution & Lifecycle Tests', () => {
-    let originalWindowDesc: PropertyDescriptor | undefined;
-    let originalNavigatorDesc: PropertyDescriptor | undefined;
+  describe('PWAUpdateManager Pure Lifecycle Tests', () => {
+    function createMockContainer(controller: ServiceWorkerController | null = { postMessage: () => {} }) {
+      const listeners: Record<string, EventListenerOrEventListenerObject[]> = {};
+      let registrationPromise: Promise<ServiceWorkerRegistrationLike> | null = null;
 
-    beforeEach(() => {
-      originalWindowDesc = Object.getOwnPropertyDescriptor(globalThis, 'window');
-      originalNavigatorDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
-    });
-
-    afterEach(() => {
-      if (originalWindowDesc) {
-        Object.defineProperty(globalThis, 'window', originalWindowDesc);
-      } else {
-        delete (globalThis as unknown as { window?: unknown }).window;
-      }
-      if (originalNavigatorDesc) {
-        Object.defineProperty(globalThis, 'navigator', originalNavigatorDesc);
-      } else {
-        delete (globalThis as unknown as { navigator?: unknown }).navigator;
-      }
-    });
-
-    // Helper harness to execute UpdateNotification component function & hooks in Node.js
-    function mountUpdateNotificationComponent(Component: (props: Record<string, unknown>) => React.ReactElement | null) {
-      const stateMap = new Map<number, unknown>();
-      const effectCleanups: Function[] = [];
-
-      let hookIndex = 0;
-
-      const mockUseState = <T>(initial: T | (() => T)): [T, (val: T | ((prev: T) => T)) => void] => {
-        const id = hookIndex++;
-        if (!stateMap.has(id)) {
-          stateMap.set(id, typeof initial === 'function' ? (initial as Function)() : initial);
-        }
-        const val = stateMap.get(id) as T;
-        const setState = (nextVal: T | ((prev: T) => T)) => {
-          const updated = typeof nextVal === 'function' ? (nextVal as Function)(val) : nextVal;
-          stateMap.set(id, updated);
-        };
-        return [val, setState];
-      };
-
-      const mockUseRef = <T>(initial: T): React.MutableRefObject<T> => {
-        const id = hookIndex++;
-        if (!stateMap.has(id)) {
-          stateMap.set(id, { current: initial });
-        }
-        return stateMap.get(id) as React.MutableRefObject<T>;
-      };
-
-      const mockUseEffect = (effect: React.EffectCallback) => {
-        const id = hookIndex++;
-        if (!stateMap.has(id)) {
-          stateMap.set(id, true);
-          const cleanup = effect();
-          if (typeof cleanup === 'function') {
-            effectCleanups.push(cleanup);
+      const container: ServiceWorkerContainerLike = {
+        controller,
+        addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => {
+          listeners[type] = listeners[type] || [];
+          listeners[type].push(listener);
+        },
+        removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) => {
+          if (listeners[type]) {
+            listeners[type] = listeners[type].filter((l) => l !== listener);
           }
-        }
+        },
+        register: (scriptURL: string) => {
+          if (registrationPromise) return registrationPromise;
+          return Promise.resolve({
+            waiting: null,
+            addEventListener: () => {},
+          });
+        },
       };
 
-      const dispatcher = {
-        useState: mockUseState,
-        useRef: mockUseRef,
-        useEffect: mockUseEffect,
-      };
-
-      const reactInternals = (React as unknown as Record<string, unknown>);
-      const clientInternals =
-        (reactInternals.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE as Record<string, unknown>) ||
-        (reactInternals.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED as Record<string, unknown>);
-
-      let prevDispatcher: unknown;
-
-      if (clientInternals) {
-        if ('H' in clientInternals) {
-          prevDispatcher = clientInternals.H;
-          clientInternals.H = dispatcher;
-        } else if ('ReactCurrentDispatcher' in clientInternals) {
-          const currentDisp = clientInternals.ReactCurrentDispatcher as { current: unknown };
-          prevDispatcher = currentDisp.current;
-          currentDisp.current = dispatcher;
-        }
-      }
-
-      try {
-        hookIndex = 0;
-        const tree = Component({});
-
-        const renderTree = () => {
-          if (clientInternals) {
-            if ('H' in clientInternals) {
-              clientInternals.H = dispatcher;
-            } else if ('ReactCurrentDispatcher' in clientInternals) {
-              (clientInternals.ReactCurrentDispatcher as { current: unknown }).current = dispatcher;
+      const dispatchEvent = (type: string) => {
+        if (listeners[type]) {
+          listeners[type].forEach((l) => {
+            if (typeof l === 'function') {
+              l(new Event(type));
+            } else if (l && typeof l.handleEvent === 'function') {
+              l.handleEvent(new Event(type));
             }
-          }
-          hookIndex = 0;
-          return Component({});
-        };
+          });
+        }
+      };
 
-        return {
-          tree,
-          renderTree,
-          cleanup: () => {
-            effectCleanups.forEach((cleanup) => cleanup());
-            if (clientInternals) {
-              if ('H' in clientInternals) {
-                clientInternals.H = prevDispatcher;
-              } else if ('ReactCurrentDispatcher' in clientInternals) {
-                (clientInternals.ReactCurrentDispatcher as { current: unknown }).current = prevDispatcher;
-              }
-            }
-          },
-        };
-      } catch (err) {
-        if (clientInternals) {
-          if ('H' in clientInternals) {
-            clientInternals.H = prevDispatcher;
-          } else if ('ReactCurrentDispatcher' in clientInternals) {
-            (clientInternals.ReactCurrentDispatcher as { current: unknown }).current = prevDispatcher;
-          }
-        }
-        throw err;
-      }
-    }
-
-    function findButtonByText(element: unknown, text: string): React.ReactElement | null {
-      if (!element || typeof element !== 'object') return null;
-      const el = element as React.ReactElement<{ children?: unknown }>;
-      if (el.props) {
-        if (typeof el.props.children === 'string' && el.props.children.includes(text)) {
-          return el;
-        }
-        if (Array.isArray(el.props.children)) {
-          for (const child of el.props.children) {
-            const found = findButtonByText(child, text);
-            if (found) return found;
-          }
-        } else if (el.props.children && typeof el.props.children === 'object') {
-          const found = findButtonByText(el.props.children, text);
-          if (found) return found;
-        }
-      }
-      return null;
+      return {
+        container,
+        listeners,
+        dispatchEvent,
+        setRegistrationPromise: (p: Promise<ServiceWorkerRegistrationLike>) => {
+          registrationPromise = p;
+        },
+      };
     }
 
     test('1. controllerchange without refresh request does NOT trigger reload', async () => {
       let reloadedCount = 0;
-      const swListeners: Record<string, Function> = {};
+      const mockEnv = createMockContainer();
 
-      const mockNavigator = {
-        serviceWorker: {
-          addEventListener: (event: string, fn: Function) => {
-            swListeners[event] = fn;
-          },
-          removeEventListener: (event: string) => {
-            delete swListeners[event];
-          },
-          register: async () => ({
-            waiting: null,
-            addEventListener: () => {},
-          }),
-          controller: {},
-        },
-      };
+      const manager = new PWAUpdateManager({
+        navigatorServiceWorker: mockEnv.container,
+        reloadPage: () => { reloadedCount++; },
+      });
 
-      const mockWindow = {
-        location: { reload: () => { reloadedCount++; } },
-      };
+      manager.init();
 
-      Object.defineProperty(globalThis, 'window', { value: mockWindow, configurable: true, writable: true });
-      Object.defineProperty(globalThis, 'navigator', { value: mockNavigator, configurable: true, writable: true });
+      // Trigger unsolicited controllerchange event
+      mockEnv.dispatchEvent('controllerchange');
 
-      const harness = mountUpdateNotificationComponent(UpdateNotification);
-
-      if (swListeners['controllerchange']) {
-        swListeners['controllerchange']();
-      }
-
-      assert.strictEqual(reloadedCount, 0, 'Unsolicited controllerchange must NOT reload');
-      harness.cleanup();
+      assert.strictEqual(reloadedCount, 0, 'Unsolicited controllerchange must NOT trigger reload');
+      manager.cleanup();
     });
 
     test('2. "Refresh sekarang" sends SKIP_WAITING and reloads ONLY after controllerchange', async () => {
       let reloadedCount = 0;
       let postedMessage: unknown = null;
-      const swListeners: Record<string, Function> = {};
-      let registrationResolve: Function;
+      let updateAvailableCalled = false;
 
-      const mockRegistrationPromise = new Promise((resolve) => {
-        registrationResolve = resolve;
-      });
+      const mockEnv = createMockContainer();
 
-      const mockWaitingWorker = {
+      const mockWaitingWorker: ServiceWorkerController = {
         state: 'installed',
         postMessage: (msg: unknown) => {
           postedMessage = msg;
         },
       };
 
-      const mockNavigator = {
-        serviceWorker: {
-          addEventListener: (event: string, fn: Function) => {
-            swListeners[event] = fn;
-          },
-          removeEventListener: () => {},
-          register: () => mockRegistrationPromise,
-          controller: {},
+      mockEnv.setRegistrationPromise(
+        Promise.resolve({
+          waiting: mockWaitingWorker,
+          addEventListener: () => {},
+        })
+      );
+
+      const manager = new PWAUpdateManager({
+        navigatorServiceWorker: mockEnv.container,
+        reloadPage: () => { reloadedCount++; },
+        onUpdateAvailable: (worker) => {
+          updateAvailableCalled = true;
         },
-      };
-
-      const mockWindow = {
-        location: { reload: () => { reloadedCount++; } },
-      };
-
-      Object.defineProperty(globalThis, 'window', { value: mockWindow, configurable: true, writable: true });
-      Object.defineProperty(globalThis, 'navigator', { value: mockNavigator, configurable: true, writable: true });
-
-      const harness = mountUpdateNotificationComponent(UpdateNotification);
-
-      assert.strictEqual(harness.renderTree(), null);
-
-      registrationResolve!({
-        waiting: mockWaitingWorker,
-        addEventListener: () => {},
       });
 
+      manager.init();
+
+      // Wait for SW registration promise to resolve
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      const dialogTree = harness.renderTree();
-      assert.notStrictEqual(dialogTree, null);
+      assert.strictEqual(updateAvailableCalled, true, 'onUpdateAvailable should be called for waiting worker');
 
-      const refreshBtn = findButtonByText(dialogTree, 'Refresh sekarang');
-      assert.notStrictEqual(refreshBtn, null, 'Refresh sekarang button should be present in rendered dialog');
+      // Call refresh (simulating "Refresh sekarang" button click)
+      manager.refresh();
 
-      (refreshBtn!.props as { onClick: () => void }).onClick();
+      assert.deepStrictEqual(postedMessage, { type: 'SKIP_WAITING' }, 'SKIP_WAITING must be sent on refresh');
+      assert.strictEqual(reloadedCount, 0, 'Reload must NOT happen before controllerchange');
 
-      assert.deepStrictEqual(postedMessage, { type: 'SKIP_WAITING' });
-      assert.strictEqual(reloadedCount, 0, 'Page reload must NOT happen before controllerchange fires');
+      // Trigger controllerchange event
+      mockEnv.dispatchEvent('controllerchange');
 
-      if (swListeners['controllerchange']) {
-        swListeners['controllerchange']();
-      }
-
-      assert.strictEqual(reloadedCount, 1, 'Page reload MUST trigger when controllerchange fires after clicking Refresh');
-      harness.cleanup();
+      assert.strictEqual(reloadedCount, 1, 'Reload MUST happen on controllerchange after refresh requested');
+      manager.cleanup();
     });
 
     test('3. "Nanti" closes dialog and does NOT trigger reload on controllerchange', async () => {
       let reloadedCount = 0;
       let postedMessage: unknown = null;
-      const swListeners: Record<string, Function> = {};
-      let registrationResolve: Function;
+      let dismissedCalled = false;
 
-      const mockRegistrationPromise = new Promise((resolve) => {
-        registrationResolve = resolve;
-      });
+      const mockEnv = createMockContainer();
 
-      const mockWaitingWorker = {
+      const mockWaitingWorker: ServiceWorkerController = {
         state: 'installed',
         postMessage: (msg: unknown) => {
           postedMessage = msg;
         },
       };
 
-      const mockNavigator = {
-        serviceWorker: {
-          addEventListener: (event: string, fn: Function) => {
-            swListeners[event] = fn;
-          },
-          removeEventListener: () => {},
-          register: () => mockRegistrationPromise,
-          controller: {},
+      mockEnv.setRegistrationPromise(
+        Promise.resolve({
+          waiting: mockWaitingWorker,
+          addEventListener: () => {},
+        })
+      );
+
+      const manager = new PWAUpdateManager({
+        navigatorServiceWorker: mockEnv.container,
+        reloadPage: () => { reloadedCount++; },
+        onUpdateDismissed: () => {
+          dismissedCalled = true;
         },
-      };
-
-      const mockWindow = {
-        location: { reload: () => { reloadedCount++; } },
-      };
-
-      Object.defineProperty(globalThis, 'window', { value: mockWindow, configurable: true, writable: true });
-      Object.defineProperty(globalThis, 'navigator', { value: mockNavigator, configurable: true, writable: true });
-
-      const harness = mountUpdateNotificationComponent(UpdateNotification);
-
-      registrationResolve!({
-        waiting: mockWaitingWorker,
-        addEventListener: () => {},
       });
+
+      manager.init();
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      const dialogTree = harness.renderTree();
-      assert.notStrictEqual(dialogTree, null);
+      // Call dismiss (simulating "Nanti" button click)
+      manager.dismiss();
 
-      const laterBtn = findButtonByText(dialogTree, 'Nanti');
-      assert.notStrictEqual(laterBtn, null, 'Nanti button should be present in rendered dialog');
+      assert.strictEqual(dismissedCalled, true);
+      assert.strictEqual(postedMessage, null, 'SKIP_WAITING must NOT be sent on dismiss');
 
-      (laterBtn!.props as { onClick: () => void }).onClick();
+      // Trigger controllerchange event
+      mockEnv.dispatchEvent('controllerchange');
 
-      assert.strictEqual(postedMessage, null, 'SKIP_WAITING must NOT be posted on Nanti');
-      assert.strictEqual(harness.renderTree(), null, 'Dialog should close on Nanti');
-
-      if (swListeners['controllerchange']) {
-        swListeners['controllerchange']();
-      }
-
-      assert.strictEqual(reloadedCount, 0, 'Clicking Nanti must NOT reload page on controllerchange');
-      harness.cleanup();
+      assert.strictEqual(reloadedCount, 0, 'Dismissing must NOT trigger reload on controllerchange');
+      manager.cleanup();
     });
 
     test('4. Reload occurs at most ONCE during update process', async () => {
       let reloadedCount = 0;
-      const swListeners: Record<string, Function> = {};
-      let registrationResolve: Function;
+      const mockEnv = createMockContainer();
 
-      const mockRegistrationPromise = new Promise((resolve) => {
-        registrationResolve = resolve;
-      });
-
-      const mockWaitingWorker = {
+      const mockWaitingWorker: ServiceWorkerController = {
         state: 'installed',
         postMessage: () => {},
       };
 
-      const mockNavigator = {
-        serviceWorker: {
-          addEventListener: (event: string, fn: Function) => {
-            swListeners[event] = fn;
-          },
-          removeEventListener: () => {},
-          register: () => mockRegistrationPromise,
-          controller: {},
-        },
-      };
+      mockEnv.setRegistrationPromise(
+        Promise.resolve({
+          waiting: mockWaitingWorker,
+          addEventListener: () => {},
+        })
+      );
 
-      const mockWindow = {
-        location: { reload: () => { reloadedCount++; } },
-      };
-
-      Object.defineProperty(globalThis, 'window', { value: mockWindow, configurable: true, writable: true });
-      Object.defineProperty(globalThis, 'navigator', { value: mockNavigator, configurable: true, writable: true });
-
-      const harness = mountUpdateNotificationComponent(UpdateNotification);
-
-      registrationResolve!({
-        waiting: mockWaitingWorker,
-        addEventListener: () => {},
+      const manager = new PWAUpdateManager({
+        navigatorServiceWorker: mockEnv.container,
+        reloadPage: () => { reloadedCount++; },
       });
+
+      manager.init();
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      const dialogTree = harness.renderTree();
-      const refreshBtn = findButtonByText(dialogTree, 'Refresh sekarang');
-      (refreshBtn!.props as { onClick: () => void }).onClick();
+      manager.refresh();
 
-      if (swListeners['controllerchange']) {
-        swListeners['controllerchange']();
-        swListeners['controllerchange']();
-        swListeners['controllerchange']();
-      }
+      // Trigger multiple controllerchange events
+      mockEnv.dispatchEvent('controllerchange');
+      mockEnv.dispatchEvent('controllerchange');
+      mockEnv.dispatchEvent('controllerchange');
 
-      assert.strictEqual(reloadedCount, 1, 'Page reload must occur at most ONCE');
-      harness.cleanup();
+      assert.strictEqual(reloadedCount, 1, 'Reload must occur at most ONCE');
+      manager.cleanup();
     });
 
-    test('5. Initial Service Worker installation (controller === null) does NOT trigger auto-reload', async () => {
+    test('5. Initial Service Worker installation (controller === null) does NOT trigger auto-reload or show update prompt', async () => {
       let reloadedCount = 0;
-      const swListeners: Record<string, Function> = {};
+      let updateAvailableCalled = false;
 
-      const mockNavigator = {
-        serviceWorker: {
-          addEventListener: (event: string, fn: Function) => {
-            swListeners[event] = fn;
-          },
-          removeEventListener: () => {},
-          register: async () => ({
-            waiting: null,
-            installing: {
-              state: 'installing',
-              addEventListener: () => {},
-            },
-            addEventListener: () => {},
-          }),
-          controller: null, // First install: no active controller
+      // Mock container with controller === null (first install)
+      const mockEnv = createMockContainer(null);
+
+      mockEnv.setRegistrationPromise(
+        Promise.resolve({
+          waiting: { state: 'installed', postMessage: () => {} },
+          addEventListener: () => {},
+        })
+      );
+
+      const manager = new PWAUpdateManager({
+        navigatorServiceWorker: mockEnv.container,
+        reloadPage: () => { reloadedCount++; },
+        onUpdateAvailable: () => {
+          updateAvailableCalled = true;
         },
-      };
+      });
 
-      const mockWindow = {
-        location: { reload: () => { reloadedCount++; } },
-      };
+      manager.init();
 
-      Object.defineProperty(globalThis, 'window', { value: mockWindow, configurable: true, writable: true });
-      Object.defineProperty(globalThis, 'navigator', { value: mockNavigator, configurable: true, writable: true });
+      await new Promise((resolve) => setTimeout(resolve, 10));
 
-      const harness = mountUpdateNotificationComponent(UpdateNotification);
+      assert.strictEqual(updateAvailableCalled, false, 'Initial install should not trigger update available prompt');
 
-      if (swListeners['controllerchange']) {
-        swListeners['controllerchange']();
-      }
+      // Trigger controllerchange event during initial claim
+      mockEnv.dispatchEvent('controllerchange');
 
-      assert.strictEqual(reloadedCount, 0, 'Initial installation controllerchange must not trigger reload');
-      assert.strictEqual(harness.renderTree(), null, 'Initial installation must not show update dialog');
-      harness.cleanup();
+      assert.strictEqual(reloadedCount, 0, 'Initial install controllerchange must not trigger reload');
+      manager.cleanup();
     });
   });
 });
