@@ -369,6 +369,8 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       manager.init();
 
+      assert.ok(mockEnv.listeners['controllerchange']?.length > 0, 'controllerchange listener must be attached during init');
+
       // Trigger unsolicited controllerchange event
       mockEnv.dispatchEvent('controllerchange');
 
@@ -407,12 +409,13 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       manager.init();
 
-      // Wait for SW registration promise to resolve
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Explicitly await async SW registration promise resolution
+      await new Promise((resolve) => setTimeout(resolve, 20));
 
+      assert.ok(mockEnv.listeners['controllerchange']?.length > 0, 'controllerchange listener must be attached');
       assert.strictEqual(updateAvailableCalled, true, 'onUpdateAvailable should be called for waiting worker');
 
-      // Call refresh (simulating "Refresh sekarang" button click)
+      // Call refresh (simulating "Refresh sekarang" button action)
       manager.refresh();
 
       assert.deepStrictEqual(postedMessage, { type: 'SKIP_WAITING' }, 'SKIP_WAITING must be sent on refresh');
@@ -456,9 +459,11 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       manager.init();
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 20));
 
-      // Call dismiss (simulating "Nanti" button click)
+      assert.ok(mockEnv.listeners['controllerchange']?.length > 0, 'controllerchange listener must be attached');
+
+      // Call dismiss (simulating "Nanti" button action)
       manager.dismiss();
 
       assert.strictEqual(dismissedCalled, true);
@@ -494,7 +499,9 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       manager.init();
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      assert.ok(mockEnv.listeners['controllerchange']?.length > 0, 'controllerchange listener must be attached');
 
       manager.refresh();
 
@@ -531,7 +538,7 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       manager.init();
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 20));
 
       assert.strictEqual(updateAvailableCalled, false, 'Initial install should not trigger update available prompt');
 
