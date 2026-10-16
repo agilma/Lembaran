@@ -279,6 +279,57 @@ describe('Reading Management & Configurable Counts Suite', () => {
   });
 
   describe('Server Safety & Database Fallback Isolation', () => {
+    test('getReadingsListInternal(true) throws or returns unauthorized for unauthenticated/VIEWER users', async () => {
+      const result = await getReadingsListInternal(true);
+      assert.strictEqual(result.success, false);
+      assert.strictEqual(result.message.includes('UNAUTHORIZED') || result.message.includes('Akses ditolak'), true);
+      assert.deepStrictEqual(result.data, []);
+    });
+
+    test('getReadingBySlugInternal filters out archived reading for public requests', async () => {
+      const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const origKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://fake-test.supabase.co';
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'fake-anon-key';
+
+      try {
+        const mockArchivedRow = {
+          id: 'test-archived-id',
+          slug: 'archived-reading',
+          title: 'Bacaan Arsip',
+          is_archived: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        const mockSessionClient = {
+          from: (_table: string) => ({
+            select: (_cols?: string) => ({
+              eq: (_col: string, val: any) => ({
+                eq: (_col2: string, _val2: any) => ({
+                  maybeSingle: () => Promise.resolve({ data: null, error: null }),
+                }),
+                maybeSingle: () => Promise.resolve({ data: mockArchivedRow, error: null }),
+              }),
+            }),
+          }),
+        };
+
+        const publicResult = await getReadingBySlugInternal('archived-reading', false, {
+          supabase: mockSessionClient,
+          adminClient: null,
+        });
+
+        assert.strictEqual(publicResult, null);
+      } finally {
+        if (origUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = origUrl;
+        else delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+        if (origKey) process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = origKey;
+        else delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      }
+    });
+
     test('deleteReadingInternal returns explicit error if SUPABASE_SECRET_KEY/Admin Client is not available', async () => {
       const origSecret = process.env.SUPABASE_SECRET_KEY;
       delete process.env.SUPABASE_SECRET_KEY;
@@ -383,7 +434,7 @@ describe('Reading Management & Configurable Counts Suite', () => {
           }),
         };
 
-        const reading = await getReadingBySlugInternal('sholawat-wahidiyah', {
+        const reading = await getReadingBySlugInternal('sholawat-wahidiyah', false, {
           supabase: mockSessionClient,
           adminClient: null,
         });

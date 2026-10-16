@@ -52,6 +52,10 @@ export async function getReadingsListInternal(
   overrides?: ClientOverrides
 ): Promise<ReadingActionResponse<Reading[]>> {
   try {
+    if (includeArchived) {
+      await requireRole(Role.EDITOR);
+    }
+
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       const staticReadings = readingsData.map((r) => ({ ...r, isArchived: false }));
       return {
@@ -124,22 +128,30 @@ export async function getReadingsListInternal(
 
 export async function getReadingBySlugInternal(
   slug: string,
+  includeArchived = false,
   overrides?: ClientOverrides
 ): Promise<Reading | null> {
   try {
+    if (includeArchived) {
+      await requireRole(Role.EDITOR);
+    }
+
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      return readingsData.find((r) => r.slug === slug) || null;
+      const staticReading = readingsData.find((r) => r.slug === slug);
+      if (!staticReading) return null;
+      return { ...staticReading, isArchived: false };
     }
 
     const adminClient =
       overrides?.adminClient !== undefined ? overrides.adminClient : getSupabaseAdminClient();
     const supabase = overrides?.supabase || adminClient || (await createClient());
 
-    const { data, error } = await supabase
-      .from("readings")
-      .select("*")
-      .eq("slug", slug)
-      .maybeSingle();
+    let query = supabase.from("readings").select("*").eq("slug", slug);
+    if (!includeArchived) {
+      query = query.eq("is_archived", false);
+    }
+
+    const { data, error } = await query.maybeSingle();
 
     if (error) {
       console.error("Error fetching reading by slug:", error);
@@ -148,6 +160,9 @@ export async function getReadingBySlugInternal(
 
     if (data) {
       const mapped = mapRowToReading(data);
+      if (!includeArchived && mapped.isArchived) {
+        return null;
+      }
       return mapped;
     }
 
