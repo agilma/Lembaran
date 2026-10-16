@@ -4,13 +4,34 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import React from 'react';
-import UpdateNotification from '../../components/UpdateNotification';
+import ReactDOMServer from 'react-dom/server';
+import UpdateNotification, { UpdateDialogContent, UpdateNotificationProps } from '../../components/UpdateNotification';
 import {
   PWAUpdateManager,
   ServiceWorkerController,
   ServiceWorkerRegistrationLike,
   ServiceWorkerContainerLike,
 } from '../pwa-update';
+
+function findButtonByText(element: unknown, text: string): React.ReactElement | null {
+  if (!element || typeof element !== 'object') return null;
+  const el = element as React.ReactElement<{ children?: unknown }>;
+  if (el.props) {
+    if (typeof el.props.children === 'string' && el.props.children.includes(text)) {
+      return el;
+    }
+    if (Array.isArray(el.props.children)) {
+      for (const child of el.props.children) {
+        const found = findButtonByText(child, text);
+        if (found) return found;
+      }
+    } else if (el.props.children && typeof el.props.children === 'object') {
+      const found = findButtonByText(el.props.children, text);
+      if (found) return found;
+    }
+  }
+  return null;
+}
 
 describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
   describe('Actual Service Worker Implementation Tests (public/sw.js)', () => {
@@ -360,26 +381,6 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
       };
     }
 
-    function findButtonByText(element: unknown, text: string): React.ReactElement | null {
-      if (!element || typeof element !== 'object') return null;
-      const el = element as React.ReactElement<{ children?: unknown }>;
-      if (el.props) {
-        if (typeof el.props.children === 'string' && el.props.children.includes(text)) {
-          return el;
-        }
-        if (Array.isArray(el.props.children)) {
-          for (const child of el.props.children) {
-            const found = findButtonByText(child, text);
-            if (found) return found;
-          }
-        } else if (el.props.children && typeof el.props.children === 'object') {
-          const found = findButtonByText(el.props.children, text);
-          if (found) return found;
-        }
-      }
-      return null;
-    }
-
     test('1. controllerchange without refresh request does NOT trigger reload', async () => {
       let reloadedCount = 0;
       const mockEnv = createMockContainer();
@@ -566,48 +567,47 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
       assert.strictEqual(reloadedCount, 0, 'Initial install controllerchange must not trigger reload');
       manager.cleanup();
     });
+  });
 
-    test('6. UpdateNotification component integration verifies Refresh sekarang and Nanti button elements invoke manager methods', () => {
+  describe('Standard React Component Integration Tests', () => {
+    test('1. UpdateNotification renders HTML modal dialog cleanly via standard ReactDOMServer.renderToString', () => {
+      const mockManager = {
+        refresh: () => {},
+        dismiss: () => {},
+      } as unknown as PWAUpdateManager;
+
+      const props: UpdateNotificationProps = { manager: mockManager, initialShowDialog: true };
+      const html = ReactDOMServer.renderToString(
+        React.createElement(UpdateNotification, props)
+      );
+
+      assert.ok(html.includes('role="dialog"'), 'HTML output must render role="dialog"');
+      assert.ok(html.includes('Pembaruan tersedia'), 'HTML output must render title Pembaruan tersedia');
+      assert.ok(html.includes('Refresh sekarang'), 'HTML output must render Refresh sekarang button');
+      assert.ok(html.includes('Nanti'), 'HTML output must render Nanti button');
+    });
+
+    test('2. UpdateDialogContent presentational element tree button click handlers invoke onRefresh and onLater callbacks', () => {
       let refreshInvoked = false;
       let dismissInvoked = false;
 
-      const mockManager = {
-        refresh: () => { refreshInvoked = true; },
-        dismiss: () => { dismissInvoked = true; },
-      } as unknown as PWAUpdateManager;
+      const handleRefresh = () => { refreshInvoked = true; };
+      const handleLater = () => { dismissInvoked = true; };
 
-      const dispatcher = {
-        useState: <T>(init: T) => [typeof init === 'function' ? (init as Function)() : init, () => {}],
-        useRef: <T>(init: T) => ({ current: init }),
-        useEffect: () => {},
-      };
+      const tree = UpdateDialogContent({ onRefresh: handleRefresh, onLater: handleLater });
+      assert.notStrictEqual(tree, null);
 
-      const reactInternals = (React as unknown as Record<string, unknown>);
-      const clientInternals =
-        (reactInternals.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE as Record<string, unknown>) ||
-        (reactInternals.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED as Record<string, unknown>);
+      const refreshBtn = findButtonByText(tree, 'Refresh sekarang');
+      assert.notStrictEqual(refreshBtn, null, 'Refresh sekarang button element must exist in JSX tree');
 
-      const prevDispatcher = clientInternals.H;
-      clientInternals.H = dispatcher;
+      const laterBtn = findButtonByText(tree, 'Nanti');
+      assert.notStrictEqual(laterBtn, null, 'Nanti button element must exist in JSX tree');
 
-      try {
-        const tree = UpdateNotification({ manager: mockManager, initialShowDialog: true });
-        assert.notStrictEqual(tree, null, 'UpdateNotification must render dialog tree when active');
+      (refreshBtn!.props as { onClick: () => void }).onClick();
+      assert.strictEqual(refreshInvoked, true, 'Refresh button onClick must call onRefresh callback');
 
-        const refreshBtn = findButtonByText(tree, 'Refresh sekarang');
-        assert.notStrictEqual(refreshBtn, null, 'Refresh sekarang button should exist in JSX tree');
-
-        const laterBtn = findButtonByText(tree, 'Nanti');
-        assert.notStrictEqual(laterBtn, null, 'Nanti button should exist in JSX tree');
-
-        (refreshBtn!.props as { onClick: () => void }).onClick();
-        assert.strictEqual(refreshInvoked, true, 'Refresh sekarang button onClick must invoke manager.refresh()');
-
-        (laterBtn!.props as { onClick: () => void }).onClick();
-        assert.strictEqual(dismissInvoked, true, 'Nanti button onClick must invoke manager.dismiss()');
-      } finally {
-        clientInternals.H = prevDispatcher;
-      }
+      (laterBtn!.props as { onClick: () => void }).onClick();
+      assert.strictEqual(dismissInvoked, true, 'Nanti button onClick must call onLater callback');
     });
   });
 });
