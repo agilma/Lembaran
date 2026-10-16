@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import { test, describe } from 'node:test';
+import { test, describe, beforeEach, afterEach } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import React from 'react';
 import ReactDOMServer from 'react-dom/server';
+import { JSDOM } from 'jsdom';
+import { render, fireEvent } from '@testing-library/react';
 import UpdateNotification, { UpdateDialogContent, UpdateNotificationProps } from '../../components/UpdateNotification';
 import {
   PWAUpdateManager,
@@ -569,45 +571,120 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
     });
   });
 
-  describe('Standard React Component Integration Tests', () => {
-    test('1. UpdateNotification renders HTML modal dialog cleanly via standard ReactDOMServer.renderToString', () => {
+  describe('React 19 Component Integration Tests with @testing-library/react', () => {
+    let jsdomInstance: InstanceType<typeof JSDOM>;
+    let originalWindowDesc: PropertyDescriptor | undefined;
+    let originalDocumentDesc: PropertyDescriptor | undefined;
+    let originalNavigatorDesc: PropertyDescriptor | undefined;
+
+    beforeEach(() => {
+      originalWindowDesc = Object.getOwnPropertyDescriptor(globalThis, 'window');
+      originalDocumentDesc = Object.getOwnPropertyDescriptor(globalThis, 'document');
+      originalNavigatorDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+
+      jsdomInstance = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
+        url: 'https://lembaran.vercel.app',
+      });
+
+      Object.defineProperty(globalThis, 'window', {
+        value: jsdomInstance.window,
+        configurable: true,
+        writable: true,
+      });
+
+      Object.defineProperty(globalThis, 'document', {
+        value: jsdomInstance.window.document,
+        configurable: true,
+        writable: true,
+      });
+
+      Object.defineProperty(globalThis, 'navigator', {
+        value: jsdomInstance.window.navigator,
+        configurable: true,
+        writable: true,
+      });
+    });
+
+    afterEach(() => {
+      if (originalWindowDesc) Object.defineProperty(globalThis, 'window', originalWindowDesc);
+      else delete (globalThis as unknown as Record<string, unknown>).window;
+
+      if (originalDocumentDesc) Object.defineProperty(globalThis, 'document', originalDocumentDesc);
+      else delete (globalThis as unknown as Record<string, unknown>).document;
+
+      if (originalNavigatorDesc) Object.defineProperty(globalThis, 'navigator', originalNavigatorDesc);
+      else delete (globalThis as unknown as Record<string, unknown>).navigator;
+    });
+
+    test('mounting UpdateNotification calls manager.init() in useEffect and unmounting calls manager.cleanup()', () => {
+      let initCalled = false;
+      let cleanupCalled = false;
+
       const mockManager = {
+        init: () => { initCalled = true; },
+        cleanup: () => { cleanupCalled = true; },
         refresh: () => {},
         dismiss: () => {},
       } as unknown as PWAUpdateManager;
 
-      const props: UpdateNotificationProps = { manager: mockManager, initialShowDialog: true };
-      const html = ReactDOMServer.renderToString(
+      const props: UpdateNotificationProps = { manager: mockManager, initialShowDialog: false };
+      const { unmount } = render(
         React.createElement(UpdateNotification, props)
       );
 
-      assert.ok(html.includes('role="dialog"'), 'HTML output must render role="dialog"');
-      assert.ok(html.includes('Pembaruan tersedia'), 'HTML output must render title Pembaruan tersedia');
-      assert.ok(html.includes('Refresh sekarang'), 'HTML output must render Refresh sekarang button');
-      assert.ok(html.includes('Nanti'), 'HTML output must render Nanti button');
+      assert.strictEqual(initCalled, true, 'manager.init() must be called on component mount in useEffect');
+
+      unmount();
+
+      assert.strictEqual(cleanupCalled, true, 'manager.cleanup() must be called on component unmount in useEffect cleanup');
     });
 
-    test('2. UpdateDialogContent presentational element tree button click handlers invoke onRefresh and onLater callbacks', () => {
-      let refreshInvoked = false;
-      let dismissInvoked = false;
+    test('clicking "Refresh sekarang" DOM button invokes manager.refresh() exactly once', () => {
+      let refreshCount = 0;
 
-      const handleRefresh = () => { refreshInvoked = true; };
-      const handleLater = () => { dismissInvoked = true; };
+      const mockManager = {
+        init: () => {},
+        cleanup: () => {},
+        refresh: () => { refreshCount++; },
+        dismiss: () => {},
+      } as unknown as PWAUpdateManager;
 
-      const tree = UpdateDialogContent({ onRefresh: handleRefresh, onLater: handleLater });
-      assert.notStrictEqual(tree, null);
+      const props: UpdateNotificationProps = { manager: mockManager, initialShowDialog: true };
+      const { container } = render(
+        React.createElement(UpdateNotification, props)
+      );
 
-      const refreshBtn = findButtonByText(tree, 'Refresh sekarang');
-      assert.notStrictEqual(refreshBtn, null, 'Refresh sekarang button element must exist in JSX tree');
+      const buttons = Array.from(container.querySelectorAll('button'));
+      const refreshBtn = buttons.find((btn) => btn.textContent?.includes('Refresh sekarang'));
+      assert.ok(refreshBtn, 'Refresh sekarang button element should exist in rendered DOM');
 
-      const laterBtn = findButtonByText(tree, 'Nanti');
-      assert.notStrictEqual(laterBtn, null, 'Nanti button element must exist in JSX tree');
+      fireEvent.click(refreshBtn!);
 
-      (refreshBtn!.props as { onClick: () => void }).onClick();
-      assert.strictEqual(refreshInvoked, true, 'Refresh button onClick must call onRefresh callback');
+      assert.strictEqual(refreshCount, 1, 'Refresh sekarang click must invoke manager.refresh() exactly once');
+    });
 
-      (laterBtn!.props as { onClick: () => void }).onClick();
-      assert.strictEqual(dismissInvoked, true, 'Nanti button onClick must call onLater callback');
+    test('clicking "Nanti" DOM button invokes manager.dismiss() exactly once', () => {
+      let dismissCount = 0;
+
+      const mockManager = {
+        init: () => {},
+        cleanup: () => {},
+        refresh: () => {},
+        dismiss: () => { dismissCount++; },
+      } as unknown as PWAUpdateManager;
+
+      const props: UpdateNotificationProps = { manager: mockManager, initialShowDialog: true };
+      const { container } = render(
+        React.createElement(UpdateNotification, props)
+      );
+
+      const buttons = Array.from(container.querySelectorAll('button'));
+      const laterBtn = buttons.find((btn) => btn.textContent?.includes('Nanti'));
+      assert.ok(laterBtn, 'Nanti button element should exist in rendered DOM');
+
+      fireEvent.click(laterBtn!);
+
+      assert.strictEqual(dismissCount, 1, 'Nanti click must invoke manager.dismiss() exactly once');
     });
   });
 });

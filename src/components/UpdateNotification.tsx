@@ -77,31 +77,28 @@ export interface UpdateNotificationProps {
   initialShowDialog?: boolean;
 }
 
-export default function UpdateNotification({
+export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
   manager: initialManager,
   initialShowDialog = false,
-}: UpdateNotificationProps): React.ReactElement | null {
+}) => {
   const [showDialog, setShowDialog] = useState<boolean>(initialShowDialog);
   const managerRef = useRef<PWAUpdateManager | null>(initialManager || null);
 
   useEffect(() => {
-    if (initialManager) {
-      managerRef.current = initialManager;
+    if (typeof window === 'undefined') {
       return;
     }
 
-    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
-      return;
-    }
-
-    const manager = new PWAUpdateManager({
-      onUpdateAvailable: () => {
-        setShowDialog(true);
-      },
-      onUpdateDismissed: () => {
-        setShowDialog(false);
-      },
-    });
+    const manager =
+      initialManager ||
+      new PWAUpdateManager({
+        onUpdateAvailable: () => {
+          setShowDialog(true);
+        },
+        onUpdateDismissed: () => {
+          setShowDialog(false);
+        },
+      });
 
     managerRef.current = manager;
     manager.init();
@@ -132,4 +129,6 @@ export default function UpdateNotification({
   }
 
   return <UpdateDialogContent onRefresh={handleRefresh} onLater={handleLater} />;
-}
+};
+
+export default UpdateNotification;
