@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Inter, Amiri } from 'next/font/google';
 import './globals.css';
 import Header from '@/components/Header';
+import UpdateNotification from '@/components/UpdateNotification';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -30,7 +31,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#0f172a',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#faf9f6' },
+    { media: '(prefers-color-scheme: dark)', color: '#0b0f17' },
+  ],
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -58,6 +62,7 @@ export default function RootLayout({
             <p>© {new Date().getFullYear()} Lembaran. Wadah tenang membaca & mengamalkan bacaan.</p>
           </div>
         </footer>
+        <UpdateNotification />
       </body>
     </html>
   );
