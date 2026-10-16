@@ -3,11 +3,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PWAUpdateManager } from '@/lib/pwa-update';
 
-export default function UpdateNotification() {
-  const [showDialog, setShowDialog] = useState<boolean>(false);
-  const managerRef = useRef<PWAUpdateManager | null>(null);
+export interface UpdateNotificationProps {
+  manager?: PWAUpdateManager;
+  initialShowDialog?: boolean;
+}
+
+export default function UpdateNotification({
+  manager: initialManager,
+  initialShowDialog = false,
+}: UpdateNotificationProps = {}) {
+  const [showDialog, setShowDialog] = useState<boolean>(initialShowDialog);
+  const managerRef = useRef<PWAUpdateManager | null>(initialManager || null);
 
   useEffect(() => {
+    if (initialManager) {
+      managerRef.current = initialManager;
+      return;
+    }
+
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
       return;
     }
@@ -27,7 +40,7 @@ export default function UpdateNotification() {
     return () => {
       manager.cleanup();
     };
-  }, []);
+  }, [initialManager]);
 
   const handleRefresh = () => {
     if (managerRef.current) {

@@ -134,7 +134,6 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
           assert.notStrictEqual(respondedPromise, null, `Navigation for ${url} should be handled by SW`);
 
           await respondedPromise;
-          // Flush microtasks deterministically without timers
           await new Promise((resolve) => setImmediate(resolve));
 
           const putEntry = swEnv.cachePuts.find((p) => p.requestUrl === url);
@@ -361,6 +360,26 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
       };
     }
 
+    function findButtonByText(element: unknown, text: string): React.ReactElement | null {
+      if (!element || typeof element !== 'object') return null;
+      const el = element as React.ReactElement<{ children?: unknown }>;
+      if (el.props) {
+        if (typeof el.props.children === 'string' && el.props.children.includes(text)) {
+          return el;
+        }
+        if (Array.isArray(el.props.children)) {
+          for (const child of el.props.children) {
+            const found = findButtonByText(child, text);
+            if (found) return found;
+          }
+        } else if (el.props.children && typeof el.props.children === 'object') {
+          const found = findButtonByText(el.props.children, text);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+
     test('1. controllerchange without refresh request does NOT trigger reload', async () => {
       let reloadedCount = 0;
       const mockEnv = createMockContainer();
@@ -412,20 +431,17 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       manager.init();
 
-      // Deterministically await registration promise resolution
       await registrationPromise;
       await new Promise((resolve) => setImmediate(resolve));
 
       assert.ok(mockEnv.listeners['controllerchange']?.length > 0, 'controllerchange listener must be attached');
       assert.strictEqual(updateAvailableCalled, true, 'onUpdateAvailable should be called for waiting worker');
 
-      // Call refresh (simulating "Refresh sekarang" button action)
       manager.refresh();
 
       assert.deepStrictEqual(postedMessage, { type: 'SKIP_WAITING' }, 'SKIP_WAITING must be sent on refresh');
       assert.strictEqual(reloadedCount, 0, 'Reload must NOT happen before controllerchange');
 
-      // Trigger controllerchange event
       mockEnv.dispatchEvent('controllerchange');
 
       assert.strictEqual(reloadedCount, 1, 'Reload MUST happen on controllerchange after refresh requested');
@@ -468,13 +484,11 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       assert.ok(mockEnv.listeners['controllerchange']?.length > 0, 'controllerchange listener must be attached');
 
-      // Call dismiss (simulating "Nanti" button action)
       manager.dismiss();
 
       assert.strictEqual(dismissedCalled, true);
       assert.strictEqual(postedMessage, null, 'SKIP_WAITING must NOT be sent on dismiss');
 
-      // Trigger controllerchange event
       mockEnv.dispatchEvent('controllerchange');
 
       assert.strictEqual(reloadedCount, 0, 'Dismissing must NOT trigger reload on controllerchange');
@@ -511,7 +525,6 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       manager.refresh();
 
-      // Trigger multiple controllerchange events
       mockEnv.dispatchEvent('controllerchange');
       mockEnv.dispatchEvent('controllerchange');
       mockEnv.dispatchEvent('controllerchange');
@@ -524,7 +537,6 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
       let reloadedCount = 0;
       let updateAvailableCalled = false;
 
-      // Mock container with controller === null (first install)
       const mockEnv = createMockContainer(null);
 
       const registrationPromise = Promise.resolve({
@@ -549,32 +561,53 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       assert.strictEqual(updateAvailableCalled, false, 'Initial install should not trigger update available prompt');
 
-      // Trigger controllerchange event during initial claim
       mockEnv.dispatchEvent('controllerchange');
 
       assert.strictEqual(reloadedCount, 0, 'Initial install controllerchange must not trigger reload');
       manager.cleanup();
     });
 
-    test('6. UpdateNotification component integration verifies refresh and dismiss button handlers invoke manager', () => {
+    test('6. UpdateNotification component integration verifies Refresh sekarang and Nanti button elements invoke manager methods', () => {
       let refreshInvoked = false;
       let dismissInvoked = false;
 
       const mockManager = {
         refresh: () => { refreshInvoked = true; },
         dismiss: () => { dismissInvoked = true; },
+      } as unknown as PWAUpdateManager;
+
+      const dispatcher = {
+        useState: <T>(init: T) => [typeof init === 'function' ? (init as Function)() : init, () => {}],
+        useRef: <T>(init: T) => ({ current: init }),
+        useEffect: () => {},
       };
 
-      // Execute button actions on the manager
-      mockManager.refresh();
-      mockManager.dismiss();
+      const reactInternals = (React as unknown as Record<string, unknown>);
+      const clientInternals =
+        (reactInternals.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE as Record<string, unknown>) ||
+        (reactInternals.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED as Record<string, unknown>);
 
-      assert.strictEqual(refreshInvoked, true, 'Refresh action must call manager.refresh()');
-      assert.strictEqual(dismissInvoked, true, 'Nanti action must call manager.dismiss()');
+      const prevDispatcher = clientInternals.H;
+      clientInternals.H = dispatcher;
 
-      // Verify UpdateNotification component renders JSX element cleanly
-      const element = React.createElement(UpdateNotification);
-      assert.notStrictEqual(element, null);
+      try {
+        const tree = UpdateNotification({ manager: mockManager, initialShowDialog: true });
+        assert.notStrictEqual(tree, null, 'UpdateNotification must render dialog tree when active');
+
+        const refreshBtn = findButtonByText(tree, 'Refresh sekarang');
+        assert.notStrictEqual(refreshBtn, null, 'Refresh sekarang button should exist in JSX tree');
+
+        const laterBtn = findButtonByText(tree, 'Nanti');
+        assert.notStrictEqual(laterBtn, null, 'Nanti button should exist in JSX tree');
+
+        (refreshBtn!.props as { onClick: () => void }).onClick();
+        assert.strictEqual(refreshInvoked, true, 'Refresh sekarang button onClick must invoke manager.refresh()');
+
+        (laterBtn!.props as { onClick: () => void }).onClick();
+        assert.strictEqual(dismissInvoked, true, 'Nanti button onClick must invoke manager.dismiss()');
+      } finally {
+        clientInternals.H = prevDispatcher;
+      }
     });
   });
 });
