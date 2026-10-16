@@ -20,6 +20,13 @@ export interface ReadingActionResponse<T = undefined> {
   isStaticFallback?: boolean;
 }
 
+export interface ClientOverrides {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase?: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  adminClient?: any | null;
+}
+
 /**
  * Maps database row to Reading type
  */
@@ -44,7 +51,8 @@ function mapRowToReading(row: any): Reading {
  * Get all readings (for management or public listing)
  */
 export async function getReadingsList(
-  includeArchived = false
+  includeArchived = false,
+  overrides?: ClientOverrides
 ): Promise<ReadingActionResponse<Reading[]>> {
   try {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
@@ -58,7 +66,8 @@ export async function getReadingsList(
       };
     }
 
-    const adminClient = getSupabaseAdminClient();
+    const adminClient =
+      overrides?.adminClient !== undefined ? overrides.adminClient : getSupabaseAdminClient();
 
     // Check total row count in DB table strictly using adminClient (bypassing session RLS)
     if (adminClient) {
@@ -66,7 +75,16 @@ export async function getReadingsList(
         .from("readings")
         .select("id", { count: "exact", head: true });
 
-      if (!countErr && count === 0) {
+      if (countErr) {
+        console.error("Error checking total readings count:", countErr);
+        return {
+          success: false,
+          message: `Gagal memuat data dari database: ${countErr.message}`,
+          data: [],
+        };
+      }
+
+      if (count === 0) {
         // DB table is confirmed completely empty (0 total rows)
         const staticReadings = readingsData.map((r) => ({ ...r, isArchived: false }));
         return {
@@ -79,7 +97,8 @@ export async function getReadingsList(
     }
 
     // Query active or all readings
-    const supabase = (includeArchived && adminClient) ? adminClient : await createClient();
+    const supabase =
+      overrides?.supabase || ((includeArchived && adminClient) ? adminClient : await createClient());
 
     let query = supabase.from("readings").select("*").order("created_at", { ascending: true });
 
@@ -110,14 +129,18 @@ export async function getReadingsList(
 /**
  * Get single reading by slug (for public reading page)
  */
-export async function getReadingBySlug(slug: string): Promise<Reading | null> {
+export async function getReadingBySlug(
+  slug: string,
+  overrides?: ClientOverrides
+): Promise<Reading | null> {
   try {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       return readingsData.find((r) => r.slug === slug) || null;
     }
 
-    const adminClient = getSupabaseAdminClient();
-    const supabase = adminClient || (await createClient());
+    const adminClient =
+      overrides?.adminClient !== undefined ? overrides.adminClient : getSupabaseAdminClient();
+    const supabase = overrides?.supabase || adminClient || (await createClient());
 
     const { data, error } = await supabase
       .from("readings")
@@ -162,15 +185,19 @@ export async function getReadingBySlug(slug: string): Promise<Reading | null> {
 /**
  * Get single reading by ID (for edit form in management UI)
  */
-export async function getReadingById(id: string): Promise<ReadingActionResponse<Reading>> {
+export async function getReadingById(
+  id: string,
+  overrides?: ClientOverrides
+): Promise<ReadingActionResponse<Reading>> {
   try {
     const user = await getCurrentUser();
     if (!user || (user.role !== Role.ADMIN && user.role !== Role.EDITOR)) {
       return { success: false, message: "UNAUTHORIZED: Akses ditolak." };
     }
 
-    const adminClient = getSupabaseAdminClient();
-    const supabase = adminClient || (await createClient());
+    const adminClient =
+      overrides?.adminClient !== undefined ? overrides.adminClient : getSupabaseAdminClient();
+    const supabase = overrides?.supabase || adminClient || (await createClient());
 
     const { data, error } = await supabase.from("readings").select("*").eq("id", id).maybeSingle();
 
@@ -189,7 +216,8 @@ export async function getReadingById(id: string): Promise<ReadingActionResponse<
  * Create a new reading (EDITOR or ADMIN only)
  */
 export async function createReading(
-  input: ReadingInputData
+  input: ReadingInputData,
+  overrides?: ClientOverrides
 ): Promise<ReadingActionResponse<Reading>> {
   try {
     // 1. Authorization check
@@ -198,8 +226,9 @@ export async function createReading(
     // 2. Input validation
     const normalized = validateAndNormalizeReadingInput(input);
 
-    const adminClient = getSupabaseAdminClient();
-    const supabase = adminClient || (await createClient());
+    const adminClient =
+      overrides?.adminClient !== undefined ? overrides.adminClient : getSupabaseAdminClient();
+    const supabase = overrides?.supabase || adminClient || (await createClient());
 
     // 3. Check slug uniqueness
     const { data: existing } = await supabase
@@ -249,7 +278,8 @@ export async function createReading(
  */
 export async function updateReading(
   id: string,
-  input: ReadingInputData
+  input: ReadingInputData,
+  overrides?: ClientOverrides
 ): Promise<ReadingActionResponse<Reading>> {
   try {
     // 1. Authorization check
@@ -258,8 +288,9 @@ export async function updateReading(
     // 2. Input validation
     const normalized = validateAndNormalizeReadingInput(input);
 
-    const adminClient = getSupabaseAdminClient();
-    const supabase = adminClient || (await createClient());
+    const adminClient =
+      overrides?.adminClient !== undefined ? overrides.adminClient : getSupabaseAdminClient();
+    const supabase = overrides?.supabase || adminClient || (await createClient());
 
     // 3. Check existing reading
     const { data: currentReading, error: fetchErr } = await supabase
@@ -326,12 +357,16 @@ export async function updateReading(
  * Performs soft delete (is_archived = true) if reading has usage history.
  * Performs hard delete if and only if reading is confirmed to have no usage history across all users.
  */
-export async function deleteReading(id: string): Promise<ReadingActionResponse> {
+export async function deleteReading(
+  id: string,
+  overrides?: ClientOverrides
+): Promise<ReadingActionResponse> {
   try {
     // 1. Authorization check
     await requireRole(Role.EDITOR);
 
-    const adminClient = getSupabaseAdminClient();
+    const adminClient =
+      overrides?.adminClient !== undefined ? overrides.adminClient : getSupabaseAdminClient();
     if (!adminClient) {
       return {
         success: false,
