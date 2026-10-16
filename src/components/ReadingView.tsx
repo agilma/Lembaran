@@ -60,7 +60,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
         const localDataString = localStorage.getItem(storageKey);
         if (localDataString) {
           const parsed = JSON.parse(localDataString);
-          localProgress = parseProgressData(parsed, sections.length);
+          localProgress = parseProgressData(parsed, sections);
         }
       } catch (e) {
         console.error('Failed to read or parse local reading progress:', e);
@@ -71,7 +71,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
       try {
         const res = await getReadingProgress(reading.slug);
         if (res.success && res.data) {
-          serverProgress = parseProgressData(res.data, sections.length);
+          serverProgress = parseProgressData(res.data, sections);
         }
       } catch (err) {
         console.error('Error fetching server reading progress:', err);
@@ -100,7 +100,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
     return () => {
       isSubscribed = false;
     };
-  }, [reading.slug, sections.length]);
+  }, [reading.slug, sections]);
 
   // Reset translation collapse state whenever section changes
   useEffect(() => {
@@ -113,12 +113,20 @@ export function ReadingView({ reading }: ReadingViewProps) {
 
     const storageKey = `lembaran_progress_${reading.slug}`;
 
+    const sectionCounts: Record<string, number> = {};
+    sections.forEach((sec, idx) => {
+      if (sec.id) {
+        sectionCounts[sec.id] = counts[idx] || 0;
+      }
+    });
+
     try {
       localStorage.setItem(
         storageKey,
         JSON.stringify({
           activeIndex,
           counts,
+          sectionCounts,
           updatedAt: new Date().toISOString(),
         })
       );
@@ -133,13 +141,20 @@ export function ReadingView({ reading }: ReadingViewProps) {
     }).catch((err) => {
       console.error('Background progress save error:', err);
     });
-  }, [activeIndex, counts, isProgressLoaded, isCompleted, reading.slug, sections.length]);
+  }, [activeIndex, counts, isProgressLoaded, isCompleted, reading.slug, sections]);
 
   const persistProgress = useCallback(
     (newIndex: number, newCounts: number[]) => {
       if (!isProgressLoaded || isCompleted || sections.length === 0) return;
 
       const storageKey = `lembaran_progress_${reading.slug}`;
+
+      const sectionCounts: Record<string, number> = {};
+      sections.forEach((sec, idx) => {
+        if (sec.id) {
+          sectionCounts[sec.id] = newCounts[idx] || 0;
+        }
+      });
 
       // Save locally (for guest and fast local state)
       try {
@@ -148,6 +163,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
           JSON.stringify({
             activeIndex: newIndex,
             counts: newCounts,
+            sectionCounts,
             updatedAt: new Date().toISOString(),
           })
         );
@@ -164,7 +180,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
         console.error('Background progress save error:', err);
       });
     },
-    [isProgressLoaded, isCompleted, sections.length, reading.slug]
+    [isProgressLoaded, isCompleted, sections, reading.slug]
   );
 
   const currentSection = sections[activeIndex];

@@ -1,4 +1,4 @@
--- Migration: Create readings table and seed default readings for Lembaran
+-- Migration: Create readings table, seed default readings, and set RLS policies
 -- Timestamp: 20261008000000
 
 CREATE TABLE IF NOT EXISTS public.readings (
@@ -25,6 +25,7 @@ ALTER TABLE public.readings ENABLE ROW LEVEL SECURITY;
 -- RLS policies for public.readings
 DO $$
 BEGIN
+    -- Anyone can view active non-archived readings
     IF NOT EXISTS (
         SELECT 1 FROM pg_policies
         WHERE tablename = 'readings' AND policyname = 'Anyone can view active readings'
@@ -33,6 +34,65 @@ BEGIN
             ON public.readings
             FOR SELECT
             USING (is_archived = false);
+    END IF;
+
+    -- Admins and Editors can view all readings (including archived)
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE tablename = 'readings' AND policyname = 'Admins and Editors can view all readings'
+    ) THEN
+        CREATE POLICY "Admins and Editors can view all readings"
+            ON public.readings
+            FOR SELECT
+            TO authenticated
+            USING (
+                (auth.jwt() -> 'app_metadata' ->> 'role') IN ('ADMIN', 'EDITOR')
+            );
+    END IF;
+
+    -- Admins and Editors can insert readings
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE tablename = 'readings' AND policyname = 'Admins and Editors can insert readings'
+    ) THEN
+        CREATE POLICY "Admins and Editors can insert readings"
+            ON public.readings
+            FOR INSERT
+            TO authenticated
+            WITH CHECK (
+                (auth.jwt() -> 'app_metadata' ->> 'role') IN ('ADMIN', 'EDITOR')
+            );
+    END IF;
+
+    -- Admins and Editors can update readings
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE tablename = 'readings' AND policyname = 'Admins and Editors can update readings'
+    ) THEN
+        CREATE POLICY "Admins and Editors can update readings"
+            ON public.readings
+            FOR UPDATE
+            TO authenticated
+            USING (
+                (auth.jwt() -> 'app_metadata' ->> 'role') IN ('ADMIN', 'EDITOR')
+            )
+            WITH CHECK (
+                (auth.jwt() -> 'app_metadata' ->> 'role') IN ('ADMIN', 'EDITOR')
+            );
+    END IF;
+
+    -- Admins and Editors can delete readings
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE tablename = 'readings' AND policyname = 'Admins and Editors can delete readings'
+    ) THEN
+        CREATE POLICY "Admins and Editors can delete readings"
+            ON public.readings
+            FOR DELETE
+            TO authenticated
+            USING (
+                (auth.jwt() -> 'app_metadata' ->> 'role') IN ('ADMIN', 'EDITOR')
+            );
     END IF;
 END $$;
 

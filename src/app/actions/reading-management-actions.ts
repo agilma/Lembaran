@@ -1,7 +1,7 @@
 "use server";
 
 import { requireRole, getCurrentUser } from "@/lib/auth-utils";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getSupabaseAdminClient } from "@/lib/supabase/server";
 import { Role } from "@/types/user";
 import { Reading } from "@/types/reading";
 import { readingsData } from "@/data/readings";
@@ -17,6 +17,7 @@ export interface ReadingActionResponse<T = undefined> {
   message: string;
   data?: T;
   isSoftDelete?: boolean;
+  isStaticFallback?: boolean;
 }
 
 /**
@@ -47,12 +48,19 @@ export async function getReadingsList(
 ): Promise<ReadingActionResponse<Reading[]>> {
   try {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      // Fallback to static readings if Supabase not configured
+      // Fallback to static readings if Supabase credentials are not configured in environment
       const staticReadings = readingsData.map((r) => ({ ...r, isArchived: false }));
-      return { success: true, message: "Memuat bacaan dari static data.", data: staticReadings };
+      return {
+        success: true,
+        message: "Supabase belum terkonfigurasi. Memuat data bawaan.",
+        data: staticReadings,
+        isStaticFallback: true,
+      };
     }
 
-    const supabase = await createClient();
+    const adminClient = getSupabaseAdminClient();
+    const supabase = adminClient || (await createClient());
+
     let query = supabase.from("readings").select("*").order("created_at", { ascending: true });
 
     if (!includeArchived) {
@@ -62,24 +70,31 @@ export async function getReadingsList(
     const { data, error } = await query;
 
     if (error) {
-      console.error("Error fetching readings from Supabase:", error);
-      // Fallback to static readings if query fails (e.g. table not migrated yet)
-      const staticReadings = readingsData.map((r) => ({ ...r, isArchived: false }));
-      return { success: true, message: "Fallback ke static data.", data: staticReadings };
+      console.error("Error fetching readings from Supabase database:", error);
+      return {
+        success: false,
+        message: `Gagal memuat data dari database: ${error.message}`,
+        data: [],
+      };
     }
 
     if (!data || data.length === 0) {
-      // Return static readings if DB table is empty
+      // Return static readings if DB table is completely empty (e.g. before initial seed)
       const staticReadings = readingsData.map((r) => ({ ...r, isArchived: false }));
-      return { success: true, message: "Memuat bacaan bawaan.", data: staticReadings };
+      return {
+        success: true,
+        message: "Database belum memiliki data. Memuat data bawaan.",
+        data: staticReadings,
+        isStaticFallback: true,
+      };
     }
 
     const readings = data.map(mapRowToReading);
-    return { success: true, message: "Berhasil memuat daftar bacaan.", data: readings };
+    return { success: true, message: "Berhasil memuat daftar bacaan dari database.", data: readings };
   } catch (err: unknown) {
     console.error("Error in getReadingsList action:", err);
-    const staticReadings = readingsData.map((r) => ({ ...r, isArchived: false }));
-    return { success: true, message: "Error memuat bacaan.", data: staticReadings };
+    const msg = err instanceof Error ? err.message : "Gagal memuat bacaan dari database.";
+    return { success: false, message: msg, data: [] };
   }
 }
 
@@ -92,21 +107,35 @@ export async function getReadingBySlug(slug: string): Promise<Reading | null> {
       return readingsData.find((r) => r.slug === slug) || null;
     }
 
-    const supabase = await createClient();
+    const adminClient = getSupabaseAdminClient();
+    const supabase = adminClient || (await createClient());
+
     const { data, error } = await supabase
       .from("readings")
       .select("*")
       .eq("slug", slug)
       .maybeSingle();
 
-    if (error || !data) {
-      return readingsData.find((r) => r.slug === slug) || null;
+    if (error) {
+      console.error("Error fetching reading by slug:", error);
+      return null;
     }
 
-    return mapRowToReading(data);
+    if (data) {
+      const mapped = mapRowToReading(data);
+      // If found in database and is archived, DO NOT fallback to static data!
+      if (mapped.isArchived) {
+        return mapped; // Returns reading with isArchived: true so page handler triggers notFound()
+      }
+      return mapped;
+    }
+
+    // If not found in DB at all, check static readings
+    const staticReading = readingsData.find((r) => r.slug === slug);
+    return staticReading || null;
   } catch (err) {
     console.error("Error in getReadingBySlug action:", err);
-    return readingsData.find((r) => r.slug === slug) || null;
+    return null;
   }
 }
 
@@ -120,7 +149,9 @@ export async function getReadingById(id: string): Promise<ReadingActionResponse<
       return { success: false, message: "UNAUTHORIZED: Akses ditolak." };
     }
 
-    const supabase = await createClient();
+    const adminClient = getSupabaseAdminClient();
+    const supabase = adminClient || (await createClient());
+
     const { data, error } = await supabase.from("readings").select("*").eq("id", id).maybeSingle();
 
     if (error || !data) {
@@ -147,7 +178,8 @@ export async function createReading(
     // 2. Input validation
     const normalized = validateAndNormalizeReadingInput(input);
 
-    const supabase = await createClient();
+    const adminClient = getSupabaseAdminClient();
+    const supabase = adminClient || (await createClient());
 
     // 3. Check slug uniqueness
     const { data: existing } = await supabase
@@ -206,7 +238,8 @@ export async function updateReading(
     // 2. Input validation
     const normalized = validateAndNormalizeReadingInput(input);
 
-    const supabase = await createClient();
+    const adminClient = getSupabaseAdminClient();
+    const supabase = adminClient || (await createClient());
 
     // 3. Check existing reading
     const { data: currentReading, error: fetchErr } = await supabase
@@ -268,15 +301,17 @@ export async function updateReading(
 
 /**
  * Safe delete reading:
- * Performs soft delete (is_archived = true) if reading has associated progress or completion records.
- * Performs hard delete if reading has no associated records.
+ * Performs soft delete (is_archived = true) if reading has associated progress or completion records across ALL users.
+ * Aborts delete if history check queries encounter errors to avoid unsafe hard deletion.
+ * Performs hard delete if and only if reading is confirmed to have no associated records across all users.
  */
 export async function deleteReading(id: string): Promise<ReadingActionResponse> {
   try {
     // 1. Authorization check
     await requireRole(Role.EDITOR);
 
-    const supabase = await createClient();
+    const adminClient = getSupabaseAdminClient();
+    const supabase = adminClient || (await createClient());
 
     // 2. Get reading details
     const { data: reading, error: fetchErr } = await supabase
@@ -289,22 +324,38 @@ export async function deleteReading(id: string): Promise<ReadingActionResponse> 
       return { success: false, message: "Bacaan tidak ditemukan." };
     }
 
-    // 3. Check for associated completion records
-    const { count: completionsCount } = await supabase
+    // 3. Query completion records across ALL users using untrusted/admin client
+    const { count: completionsCount, error: completionsErr } = await supabase
       .from("reading_completions")
       .select("id", { count: "exact", head: true })
       .eq("reading_slug", reading.slug);
 
-    // 4. Check for associated progress records
-    const { count: progressCount } = await supabase
+    if (completionsErr) {
+      console.error("Error checking reading completions history during deletion:", completionsErr);
+      return {
+        success: false,
+        message: "Gagal memverifikasi riwayat penyelesaian pengguna. Penghapusan dibatalkan demi keamanan data.",
+      };
+    }
+
+    // 4. Query progress records across ALL users using untrusted/admin client
+    const { count: progressCount, error: progressErr } = await supabase
       .from("reading_progress")
       .select("id", { count: "exact", head: true })
       .eq("reading_slug", reading.slug);
 
+    if (progressErr) {
+      console.error("Error checking reading progress history during deletion:", progressErr);
+      return {
+        success: false,
+        message: "Gagal memverifikasi progress pengguna. Penghapusan dibatalkan demi keamanan data.",
+      };
+    }
+
     const hasUsageHistory = (completionsCount ?? 0) > 0 || (progressCount ?? 0) > 0;
 
     if (hasUsageHistory) {
-      // Soft delete: Archive the reading to preserve history and FK compatibility
+      // Soft delete: Archive the reading to preserve user history and FK compatibility
       const { error: archiveError } = await supabase
         .from("readings")
         .update({ is_archived: true, updated_at: new Date().toISOString() })

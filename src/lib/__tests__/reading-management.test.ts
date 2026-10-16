@@ -6,6 +6,8 @@ import {
 } from '../reading-management-utils';
 import { parseRole } from '../auth-utils';
 import { Role } from '../../types/user';
+import { parseProgressData } from '../reading-progress';
+import { ReadingSection } from '../../types/reading';
 
 describe('Reading Management & Configurable Counts Suite', () => {
   describe('Input Validation & repeatCount Normalization', () => {
@@ -176,6 +178,59 @@ describe('Reading Management & Configurable Counts Suite', () => {
       assert.strictEqual(parseRole('VIEWER'), Role.VIEWER);
       assert.strictEqual(parseRole('unknown'), Role.VIEWER);
       assert.strictEqual(parseRole(null), Role.VIEWER);
+    });
+  });
+
+  describe('Section ID Progress Mapping & Reordering Compatibility', () => {
+    test('section ID mapping maintains correct counts even when sections are reordered', () => {
+      const originalSections: ReadingSection[] = [
+        { id: 'sec-a', instruction: 'Bagian A', repeatCount: 7 },
+        { id: 'sec-b', instruction: 'Bagian B', repeatCount: 33 },
+      ];
+
+      const savedDataWithSectionCounts = {
+        activeIndex: 0,
+        counts: [7, 33],
+        sectionCounts: {
+          'sec-a': 7,
+          'sec-b': 33,
+        },
+      };
+
+      // Reordered sections (Bagian B is now first)
+      const reorderedSections: ReadingSection[] = [
+        { id: 'sec-b', instruction: 'Bagian B', repeatCount: 33 },
+        { id: 'sec-a', instruction: 'Bagian A', repeatCount: 7 },
+      ];
+
+      const parsedReordered = parseProgressData(savedDataWithSectionCounts, reorderedSections);
+
+      assert.notStrictEqual(parsedReordered, null);
+      // Index 0 (sec-b) should receive count 33
+      assert.strictEqual(parsedReordered?.counts[0], 33);
+      // Index 1 (sec-a) should receive count 7
+      assert.strictEqual(parsedReordered?.counts[1], 7);
+    });
+
+    test('falls back safely to array index counts for legacy progress data', () => {
+      const sections: ReadingSection[] = [
+        { id: 'sec-1', instruction: 'Bagian 1' },
+        { id: 'sec-2', instruction: 'Bagian 2' },
+      ];
+
+      const legacyData = {
+        activeIndex: 1,
+        counts: [5, 12],
+      };
+
+      const parsedLegacy = parseProgressData(legacyData, sections);
+
+      assert.notStrictEqual(parsedLegacy, null);
+      assert.strictEqual(parsedLegacy?.activeIndex, 1);
+      assert.strictEqual(parsedLegacy?.counts[0], 5);
+      assert.strictEqual(parsedLegacy?.counts[1], 12);
+      assert.strictEqual(parsedLegacy?.sectionCounts?.['sec-1'], 5);
+      assert.strictEqual(parsedLegacy?.sectionCounts?.['sec-2'], 12);
     });
   });
 });
