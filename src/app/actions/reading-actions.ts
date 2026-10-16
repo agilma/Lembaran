@@ -377,6 +377,16 @@ export async function getReadingHistory(): Promise<GetReadingHistoryResult> {
     const titleMap = new Map<string, string>();
     readingsData.forEach((r) => titleMap.set(r.slug, r.title));
 
+    // Also populate titleMap from database (including archived readings)
+    try {
+      const { data: dbReadings } = await supabase.from("readings").select("slug, title");
+      if (dbReadings) {
+        dbReadings.forEach((r) => titleMap.set(r.slug, r.title));
+      }
+    } catch {
+      // Ignore DB title map error, static fallback already set
+    }
+
     const completions: CompletionRecordItem[] = data.map((item) => {
       const readingTitle = titleMap.get(item.reading_slug) || item.reading_slug;
       const formatted = formatInJakartaTimezone(item.completed_at);

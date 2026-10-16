@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { readingsData } from '@/data/readings';
+import { getReadingBySlug, getReadingsList } from '@/app/actions/reading-management-actions';
 import { ReadingView } from '@/components/ReadingView';
 import type { Metadata } from 'next';
 
@@ -10,16 +10,18 @@ interface Props {
 }
 
 export async function generateStaticParams() {
-  return readingsData.map((reading) => ({
+  const response = await getReadingsList(false);
+  const readings = response.data || [];
+  return readings.map((reading) => ({
     slug: reading.slug,
   }));
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const reading = readingsData.find((item) => item.slug === slug);
+  const reading = await getReadingBySlug(slug);
 
-  if (!reading) {
+  if (!reading || reading.isArchived) {
     return {
       title: 'Bacaan Tidak Ditemukan',
     };
@@ -33,9 +35,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function BacaanDetailPage({ params }: Props) {
   const { slug } = await params;
-  const reading = readingsData.find((item) => item.slug === slug);
+  const reading = await getReadingBySlug(slug);
 
-  if (!reading) {
+  if (!reading || reading.isArchived) {
     notFound();
   }
 

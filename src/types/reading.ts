@@ -16,6 +16,7 @@ export interface ReadingSection {
   instruction?: string;
   /**
    * Optional target count helper. Must be an integer > 0 if provided.
+   * A value of 0 or undefined means no target.
    */
   repeatCount?: number;
 }
@@ -34,4 +35,7 @@ export interface Reading {
   content?: string;
   sections?: ReadingSection[];
   estimatedTime?: string;
+  isArchived?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
