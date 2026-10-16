@@ -12,10 +12,7 @@ import {
   deleteReadingInternal,
   getReadingBySlugInternal,
   getReadingsListInternal,
-  deleteReading,
-  getReadingBySlug,
-  getReadingsList,
-} from '../../app/actions/reading-management-actions';
+} from '../reading-management-service';
 
 describe('Reading Management & Configurable Counts Suite', () => {
   describe('Input Validation & repeatCount Normalization', () => {
