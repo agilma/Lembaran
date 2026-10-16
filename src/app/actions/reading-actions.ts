@@ -20,6 +20,7 @@ export interface RecordCompletionResult {
 export interface ReadingProgressData {
   activeIndex: number;
   counts: number[];
+  sectionCounts?: Record<string, number>;
   updatedAt?: string;
 }
 
@@ -33,6 +34,7 @@ export interface SaveProgressParams {
   readingSlug: string;
   activeIndex: number;
   counts: number[];
+  sectionCounts?: Record<string, number>;
 }
 
 export interface SaveProgressResult {
@@ -180,11 +182,27 @@ export async function getReadingProgress(
       return { success: true, data: null };
     }
 
+    let parsedCounts: number[] = [];
+    let parsedSectionCounts: Record<string, number> | undefined = undefined;
+
+    if (Array.isArray(data.counts)) {
+      parsedCounts = data.counts;
+    } else if (data.counts && typeof data.counts === "object") {
+      const obj = data.counts as Record<string, unknown>;
+      if (Array.isArray(obj.counts)) {
+        parsedCounts = obj.counts as number[];
+      }
+      if (obj.sectionCounts && typeof obj.sectionCounts === "object") {
+        parsedSectionCounts = obj.sectionCounts as Record<string, number>;
+      }
+    }
+
     return {
       success: true,
       data: {
         activeIndex: data.active_index,
-        counts: Array.isArray(data.counts) ? data.counts : [],
+        counts: parsedCounts,
+        sectionCounts: parsedSectionCounts,
         updatedAt: data.updated_at,
       },
     };
@@ -222,12 +240,16 @@ export async function saveReadingProgress(
 
     const updatedAt = new Date().toISOString();
 
+    const countsPayload = params.sectionCounts
+      ? { counts: params.counts, sectionCounts: params.sectionCounts }
+      : params.counts;
+
     const { error } = await supabase.from("reading_progress").upsert(
       {
         user_id: user.id,
         reading_slug: params.readingSlug,
         active_index: params.activeIndex,
-        counts: params.counts,
+        counts: countsPayload,
         updated_at: updatedAt,
       },
       { onConflict: "user_id,reading_slug" }

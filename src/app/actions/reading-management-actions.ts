@@ -123,14 +123,23 @@ export async function getReadingBySlug(slug: string): Promise<Reading | null> {
 
     if (data) {
       const mapped = mapRowToReading(data);
-      // If found in database and is archived, DO NOT fallback to static data!
-      if (mapped.isArchived) {
-        return mapped; // Returns reading with isArchived: true so page handler triggers notFound()
-      }
+      // If found in database (whether active or archived), return mapped reading.
+      // If archived, the caller page component will trigger notFound()!
       return mapped;
     }
 
-    // If not found in DB at all, check static readings
+    // If reading is not found in database, check if DB has ANY readings.
+    // If DB is operating and has readings, return null (do NOT revive archived/non-existent readings via static fallback)
+    const { count, error: countErr } = await supabase
+      .from("readings")
+      .select("id", { count: "exact", head: true });
+
+    if (!countErr && typeof count === "number" && count > 0) {
+      // Database has readings, so slug truly does not exist or was deleted
+      return null;
+    }
+
+    // Fallback to static readings only if DB is empty
     const staticReading = readingsData.find((r) => r.slug === slug);
     return staticReading || null;
   } catch (err) {
@@ -301,9 +310,10 @@ export async function updateReading(
 
 /**
  * Safe delete reading:
- * Performs soft delete (is_archived = true) if reading has associated progress or completion records across ALL users.
- * Aborts delete if history check queries encounter errors to avoid unsafe hard deletion.
- * Performs hard delete if and only if reading is confirmed to have no associated records across all users.
+ * Strictly requires service-role admin client to check reading_completions and reading_progress across ALL users.
+ * Aborts delete if admin client is unavailable or history check queries encounter errors.
+ * Performs soft delete (is_archived = true) if reading has usage history.
+ * Performs hard delete if and only if reading is confirmed to have no usage history across all users.
  */
 export async function deleteReading(id: string): Promise<ReadingActionResponse> {
   try {
@@ -311,10 +321,15 @@ export async function deleteReading(id: string): Promise<ReadingActionResponse> 
     await requireRole(Role.EDITOR);
 
     const adminClient = getSupabaseAdminClient();
-    const supabase = adminClient || (await createClient());
+    if (!adminClient) {
+      return {
+        success: false,
+        message: "Akses administratif database (SUPABASE_SECRET_KEY) tidak tersedia untuk memverifikasi riwayat seluruh pengguna. Penghapusan dibatalkan demi keamanan data.",
+      };
+    }
 
     // 2. Get reading details
-    const { data: reading, error: fetchErr } = await supabase
+    const { data: reading, error: fetchErr } = await adminClient
       .from("readings")
       .select("id, slug, title")
       .eq("id", id)
@@ -324,8 +339,8 @@ export async function deleteReading(id: string): Promise<ReadingActionResponse> 
       return { success: false, message: "Bacaan tidak ditemukan." };
     }
 
-    // 3. Query completion records across ALL users using untrusted/admin client
-    const { count: completionsCount, error: completionsErr } = await supabase
+    // 3. Query completion records across ALL users using admin client
+    const { count: completionsCount, error: completionsErr } = await adminClient
       .from("reading_completions")
       .select("id", { count: "exact", head: true })
       .eq("reading_slug", reading.slug);
@@ -338,8 +353,8 @@ export async function deleteReading(id: string): Promise<ReadingActionResponse> 
       };
     }
 
-    // 4. Query progress records across ALL users using untrusted/admin client
-    const { count: progressCount, error: progressErr } = await supabase
+    // 4. Query progress records across ALL users using admin client
+    const { count: progressCount, error: progressErr } = await adminClient
       .from("reading_progress")
       .select("id", { count: "exact", head: true })
       .eq("reading_slug", reading.slug);
@@ -356,7 +371,7 @@ export async function deleteReading(id: string): Promise<ReadingActionResponse> 
 
     if (hasUsageHistory) {
       // Soft delete: Archive the reading to preserve user history and FK compatibility
-      const { error: archiveError } = await supabase
+      const { error: archiveError } = await adminClient
         .from("readings")
         .update({ is_archived: true, updated_at: new Date().toISOString() })
         .eq("id", id);
@@ -373,7 +388,7 @@ export async function deleteReading(id: string): Promise<ReadingActionResponse> 
       };
     } else {
       // Hard delete: Safe to remove from DB completely
-      const { error: deleteError } = await supabase.from("readings").delete().eq("id", id);
+      const { error: deleteError } = await adminClient.from("readings").delete().eq("id", id);
 
       if (deleteError) {
         console.error("Failed to delete reading:", deleteError);

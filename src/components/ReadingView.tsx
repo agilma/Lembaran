@@ -138,6 +138,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
       readingSlug: reading.slug,
       activeIndex,
       counts,
+      sectionCounts,
     }).catch((err) => {
       console.error('Background progress save error:', err);
     });
@@ -176,6 +177,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
         readingSlug: reading.slug,
         activeIndex: newIndex,
         counts: newCounts,
+        sectionCounts,
       }).catch((err) => {
         console.error('Background progress save error:', err);
       });

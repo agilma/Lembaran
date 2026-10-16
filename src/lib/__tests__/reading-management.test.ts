@@ -8,6 +8,7 @@ import { parseRole } from '../auth-utils';
 import { Role } from '../../types/user';
 import { parseProgressData } from '../reading-progress';
 import { ReadingSection } from '../../types/reading';
+import { deleteReading, getReadingBySlug } from '../../app/actions/reading-management-actions';
 
 describe('Reading Management & Configurable Counts Suite', () => {
   describe('Input Validation & repeatCount Normalization', () => {
@@ -212,6 +213,29 @@ describe('Reading Management & Configurable Counts Suite', () => {
       assert.strictEqual(parsedReordered?.counts[1], 7);
     });
 
+    test('parses progress JSONB payload containing sectionCounts object correctly', () => {
+      const sections: ReadingSection[] = [
+        { id: 'sw-1', instruction: 'Fatihah 7x' },
+        { id: 'sw-2', instruction: 'Tasbih 100x' },
+      ];
+
+      const jsonbPayload = {
+        counts: [7, 100],
+        sectionCounts: {
+          'sw-1': 7,
+          'sw-2': 100,
+        },
+      };
+
+      const parsed = parseProgressData(jsonbPayload, sections);
+
+      assert.notStrictEqual(parsed, null);
+      assert.strictEqual(parsed?.counts[0], 7);
+      assert.strictEqual(parsed?.counts[1], 100);
+      assert.strictEqual(parsed?.sectionCounts?.['sw-1'], 7);
+      assert.strictEqual(parsed?.sectionCounts?.['sw-2'], 100);
+    });
+
     test('falls back safely to array index counts for legacy progress data', () => {
       const sections: ReadingSection[] = [
         { id: 'sec-1', instruction: 'Bagian 1' },
@@ -231,6 +255,35 @@ describe('Reading Management & Configurable Counts Suite', () => {
       assert.strictEqual(parsedLegacy?.counts[1], 12);
       assert.strictEqual(parsedLegacy?.sectionCounts?.['sec-1'], 5);
       assert.strictEqual(parsedLegacy?.sectionCounts?.['sec-2'], 12);
+    });
+  });
+
+  describe('Server Safety & Admin Client Checks', () => {
+    test('deleteReading returns explicit error if SUPABASE_SECRET_KEY/Admin Client is not available', async () => {
+      // Temporarily clear SUPABASE_SECRET_KEY
+      const origSecret = process.env.SUPABASE_SECRET_KEY;
+      delete process.env.SUPABASE_SECRET_KEY;
+
+      try {
+        const result = await deleteReading('test-id');
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(result.message.includes('Akses ditolak') || result.message.includes('SUPABASE_SECRET_KEY'), true);
+      } finally {
+        if (origSecret) process.env.SUPABASE_SECRET_KEY = origSecret;
+      }
+    });
+
+    test('getReadingBySlug returns static reading if Supabase URL is unconfigured', async () => {
+      const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+      try {
+        const reading = await getReadingBySlug('sholawat-wahidiyah');
+        assert.notStrictEqual(reading, null);
+        assert.strictEqual(reading?.slug, 'sholawat-wahidiyah');
+      } finally {
+        if (origUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = origUrl;
+      }
     });
   });
 });
