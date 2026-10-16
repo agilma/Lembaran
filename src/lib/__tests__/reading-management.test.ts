@@ -184,7 +184,6 @@ describe('Reading Management & Configurable Counts Suite', () => {
 
   describe('Section ID Progress Mapping & activeSectionId Position Preservation', () => {
     test('activeSectionId correctly updates activeIndex when sections are reordered', () => {
-      // Original order: [sec-1, sec-2, sec-3], active was sec-2 (index 1)
       const reorderedSections: ReadingSection[] = [
         { id: 'sec-3', instruction: 'Bagian C' },
         { id: 'sec-2', instruction: 'Bagian B' },
@@ -205,7 +204,6 @@ describe('Reading Management & Configurable Counts Suite', () => {
       const parsed = parseProgressData(savedData, reorderedSections);
 
       assert.notStrictEqual(parsed, null);
-      // 'sec-2' is now at index 1 in reordered list
       assert.strictEqual(parsed?.activeIndex, 1);
       assert.strictEqual(parsed?.activeSectionId, 'sec-2');
       assert.strictEqual(parsed?.counts[1], 5);
@@ -213,13 +211,13 @@ describe('Reading Management & Configurable Counts Suite', () => {
 
     test('reloads position correctly when active section moves to different index', () => {
       const reorderedSections: ReadingSection[] = [
-        { id: 'sec-2', instruction: 'Bagian B' }, // Moved to index 0
-        { id: 'sec-1', instruction: 'Bagian A' }, // Moved to index 1
+        { id: 'sec-2', instruction: 'Bagian B' },
+        { id: 'sec-1', instruction: 'Bagian A' },
       ];
 
       const savedData = {
-        activeIndex: 1, // Was at index 1 originally
-        activeSectionId: 'sec-2', // Pointed to sec-2
+        activeIndex: 1,
+        activeSectionId: 'sec-2',
         counts: [10, 25],
         sectionCounts: {
           'sec-1': 10,
@@ -230,7 +228,6 @@ describe('Reading Management & Configurable Counts Suite', () => {
       const parsed = parseProgressData(savedData, reorderedSections);
 
       assert.notStrictEqual(parsed, null);
-      // 'sec-2' is now index 0!
       assert.strictEqual(parsed?.activeIndex, 0);
       assert.strictEqual(parsed?.counts[0], 25);
       assert.strictEqual(parsed?.counts[1], 10);
@@ -242,7 +239,6 @@ describe('Reading Management & Configurable Counts Suite', () => {
         { id: 'sec-b', instruction: 'Bagian B' },
       ];
 
-      // Saved activeSectionId 'sec-deleted' was removed
       const dataWithDeletedSection = {
         activeIndex: 1,
         activeSectionId: 'sec-deleted',
@@ -252,7 +248,6 @@ describe('Reading Management & Configurable Counts Suite', () => {
       const parsed = parseProgressData(dataWithDeletedSection, sections);
 
       assert.notStrictEqual(parsed, null);
-      // Fallback to valid savedIndex 1
       assert.strictEqual(parsed?.activeIndex, 1);
       assert.strictEqual(parsed?.counts[1], 4);
     });

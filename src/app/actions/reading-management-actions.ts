@@ -59,34 +59,28 @@ export async function getReadingsList(
     }
 
     const adminClient = getSupabaseAdminClient();
-    const supabase = adminClient || (await createClient());
 
-    // Check total row count in DB table regardless of is_archived status
-    const { count, error: countErr } = await supabase
-      .from("readings")
-      .select("id", { count: "exact", head: true });
+    // Check total row count in DB table strictly using adminClient (bypassing session RLS)
+    if (adminClient) {
+      const { count, error: countErr } = await adminClient
+        .from("readings")
+        .select("id", { count: "exact", head: true });
 
-    if (countErr) {
-      console.error("Error checking total readings count:", countErr);
-      return {
-        success: false,
-        message: `Gagal memuat data dari database: ${countErr.message}`,
-        data: [],
-      };
+      if (!countErr && count === 0) {
+        // DB table is confirmed completely empty (0 total rows)
+        const staticReadings = readingsData.map((r) => ({ ...r, isArchived: false }));
+        return {
+          success: true,
+          message: "Database belum memiliki data. Memuat data bawaan.",
+          data: staticReadings,
+          isStaticFallback: true,
+        };
+      }
     }
 
-    if (count === 0) {
-      // Return static readings ONLY if DB table is completely empty (0 rows)
-      const staticReadings = readingsData.map((r) => ({ ...r, isArchived: false }));
-      return {
-        success: true,
-        message: "Database belum memiliki data. Memuat data bawaan.",
-        data: staticReadings,
-        isStaticFallback: true,
-      };
-    }
+    // Query active or all readings
+    const supabase = (includeArchived && adminClient) ? adminClient : await createClient();
 
-    // Database table contains readings! Fetch list according to includeArchived flag
     let query = supabase.from("readings").select("*").order("created_at", { ascending: true });
 
     if (!includeArchived) {
@@ -139,23 +133,26 @@ export async function getReadingBySlug(slug: string): Promise<Reading | null> {
     if (data) {
       const mapped = mapRowToReading(data);
       // If found in database (whether active or archived), return mapped reading.
-      // If archived, mapped.isArchived is true and the caller page component will trigger notFound()!
+      // If archived, mapped.isArchived is true and caller component triggers notFound()!
       return mapped;
     }
 
-    // If reading is not found in database, check if DB has ANY readings.
-    const { count, error: countErr } = await supabase
-      .from("readings")
-      .select("id", { count: "exact", head: true });
+    // If reading was not found, check if DB table is confirmed completely empty (0 rows) using adminClient.
+    if (adminClient) {
+      const { count, error: countErr } = await adminClient
+        .from("readings")
+        .select("id", { count: "exact", head: true });
 
-    if (!countErr && typeof count === "number" && count > 0) {
-      // Database has readings, so slug truly does not exist or was deleted/archived
-      return null;
+      if (!countErr && count === 0) {
+        // Table is confirmed completely empty: fallback to static data
+        const staticReading = readingsData.find((r) => r.slug === slug);
+        return staticReading || null;
+      }
     }
 
-    // Fallback to static readings only if DB table is completely empty
-    const staticReading = readingsData.find((r) => r.slug === slug);
-    return staticReading || null;
+    // Database is configured and has readings (or adminClient is unavailable): slug is truly missing, archived, or deleted.
+    // Return null (DO NOT revive archived/non-existent readings via static fallback)
+    return null;
   } catch (err) {
     console.error("Error in getReadingBySlug action:", err);
     return null;
