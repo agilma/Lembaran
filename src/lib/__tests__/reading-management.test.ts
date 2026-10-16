@@ -8,7 +8,7 @@ import { parseRole } from '../auth-utils';
 import { Role } from '../../types/user';
 import { parseProgressData } from '../reading-progress';
 import { ReadingSection } from '../../types/reading';
-import { deleteReading, getReadingBySlug } from '../../app/actions/reading-management-actions';
+import { deleteReading, getReadingBySlug, getReadingsList } from '../../app/actions/reading-management-actions';
 
 describe('Reading Management & Configurable Counts Suite', () => {
   describe('Input Validation & repeatCount Normalization', () => {
@@ -274,7 +274,7 @@ describe('Reading Management & Configurable Counts Suite', () => {
     });
   });
 
-  describe('Server Safety & Admin Client Checks', () => {
+  describe('Server Safety & Database Fallback Isolation', () => {
     test('deleteReading returns explicit error if SUPABASE_SECRET_KEY/Admin Client is not available', async () => {
       const origSecret = process.env.SUPABASE_SECRET_KEY;
       delete process.env.SUPABASE_SECRET_KEY;
@@ -296,6 +296,20 @@ describe('Reading Management & Configurable Counts Suite', () => {
         const reading = await getReadingBySlug('sholawat-wahidiyah');
         assert.notStrictEqual(reading, null);
         assert.strictEqual(reading?.slug, 'sholawat-wahidiyah');
+      } finally {
+        if (origUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = origUrl;
+      }
+    });
+
+    test('getReadingsList returns fallback only when Supabase is completely unconfigured', async () => {
+      const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+      try {
+        const res = await getReadingsList(false);
+        assert.strictEqual(res.success, true);
+        assert.strictEqual(res.isStaticFallback, true);
+        assert.strictEqual((res.data?.length ?? 0) > 0, true);
       } finally {
         if (origUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = origUrl;
       }
