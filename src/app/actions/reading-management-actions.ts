@@ -47,16 +47,16 @@ function mapRowToReading(row: any): Reading {
   };
 }
 
-/**
- * Get all readings (for management or public listing)
- */
-export async function getReadingsList(
+/* ============================================================================
+ * INTERNAL IMPLEMENTATIONS (Accept optional ClientOverrides for unit testing)
+ * ============================================================================ */
+
+export async function getReadingsListInternal(
   includeArchived = false,
   overrides?: ClientOverrides
 ): Promise<ReadingActionResponse<Reading[]>> {
   try {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      // Fallback to static readings if Supabase credentials are not configured in environment
       const staticReadings = readingsData.map((r) => ({ ...r, isArchived: false }));
       return {
         success: true,
@@ -126,10 +126,7 @@ export async function getReadingsList(
   }
 }
 
-/**
- * Get single reading by slug (for public reading page)
- */
-export async function getReadingBySlug(
+export async function getReadingBySlugInternal(
   slug: string,
   overrides?: ClientOverrides
 ): Promise<Reading | null> {
@@ -155,8 +152,6 @@ export async function getReadingBySlug(
 
     if (data) {
       const mapped = mapRowToReading(data);
-      // If found in database (whether active or archived), return mapped reading.
-      // If archived, mapped.isArchived is true and caller component triggers notFound()!
       return mapped;
     }
 
@@ -182,10 +177,7 @@ export async function getReadingBySlug(
   }
 }
 
-/**
- * Get single reading by ID (for edit form in management UI)
- */
-export async function getReadingById(
+export async function getReadingByIdInternal(
   id: string,
   overrides?: ClientOverrides
 ): Promise<ReadingActionResponse<Reading>> {
@@ -212,10 +204,7 @@ export async function getReadingById(
   }
 }
 
-/**
- * Create a new reading (EDITOR or ADMIN only)
- */
-export async function createReading(
+export async function createReadingInternal(
   input: ReadingInputData,
   overrides?: ClientOverrides
 ): Promise<ReadingActionResponse<Reading>> {
@@ -273,10 +262,7 @@ export async function createReading(
   }
 }
 
-/**
- * Update an existing reading (EDITOR or ADMIN only)
- */
-export async function updateReading(
+export async function updateReadingInternal(
   id: string,
   input: ReadingInputData,
   overrides?: ClientOverrides
@@ -350,14 +336,7 @@ export async function updateReading(
   }
 }
 
-/**
- * Safe delete reading:
- * Strictly requires service-role admin client to check reading_completions and reading_progress across ALL users.
- * Aborts delete if admin client is unavailable or history check queries encounter errors.
- * Performs soft delete (is_archived = true) if reading has usage history.
- * Performs hard delete if and only if reading is confirmed to have no usage history across all users.
- */
-export async function deleteReading(
+export async function deleteReadingInternal(
   id: string,
   overrides?: ClientOverrides
 ): Promise<ReadingActionResponse> {
@@ -451,4 +430,37 @@ export async function deleteReading(
     const msg = err instanceof Error ? err.message : "Terjadi kesalahan saat menghapus bacaan.";
     return { success: false, message: msg };
   }
+}
+
+/* ============================================================================
+ * PUBLIC SERVER ACTIONS (Clean production API contracts)
+ * ============================================================================ */
+
+export async function getReadingsList(
+  includeArchived = false
+): Promise<ReadingActionResponse<Reading[]>> {
+  return getReadingsListInternal(includeArchived);
+}
+
+export async function getReadingBySlug(slug: string): Promise<Reading | null> {
+  return getReadingBySlugInternal(slug);
+}
+
+export async function getReadingById(id: string): Promise<ReadingActionResponse<Reading>> {
+  return getReadingByIdInternal(id);
+}
+
+export async function createReading(input: ReadingInputData): Promise<ReadingActionResponse<Reading>> {
+  return createReadingInternal(input);
+}
+
+export async function updateReading(
+  id: string,
+  input: ReadingInputData
+): Promise<ReadingActionResponse<Reading>> {
+  return updateReadingInternal(id, input);
+}
+
+export async function deleteReading(id: string): Promise<ReadingActionResponse> {
+  return deleteReadingInternal(id);
 }

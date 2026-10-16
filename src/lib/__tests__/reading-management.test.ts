@@ -8,7 +8,14 @@ import { parseRole } from '../auth-utils';
 import { Role } from '../../types/user';
 import { parseProgressData } from '../reading-progress';
 import { ReadingSection } from '../../types/reading';
-import { deleteReading, getReadingBySlug, getReadingsList } from '../../app/actions/reading-management-actions';
+import {
+  deleteReadingInternal,
+  getReadingBySlugInternal,
+  getReadingsListInternal,
+  deleteReading,
+  getReadingBySlug,
+  getReadingsList,
+} from '../../app/actions/reading-management-actions';
 
 describe('Reading Management & Configurable Counts Suite', () => {
   describe('Input Validation & repeatCount Normalization', () => {
@@ -275,12 +282,12 @@ describe('Reading Management & Configurable Counts Suite', () => {
   });
 
   describe('Server Safety & Database Fallback Isolation', () => {
-    test('deleteReading returns explicit error if SUPABASE_SECRET_KEY/Admin Client is not available', async () => {
+    test('deleteReadingInternal returns explicit error if SUPABASE_SECRET_KEY/Admin Client is not available', async () => {
       const origSecret = process.env.SUPABASE_SECRET_KEY;
       delete process.env.SUPABASE_SECRET_KEY;
 
       try {
-        const result = await deleteReading('test-id');
+        const result = await deleteReadingInternal('test-id');
         assert.strictEqual(result.success, false);
         assert.strictEqual(result.message.includes('Akses ditolak') || result.message.includes('SUPABASE_SECRET_KEY'), true);
       } finally {
@@ -288,12 +295,12 @@ describe('Reading Management & Configurable Counts Suite', () => {
       }
     });
 
-    test('getReadingBySlug returns static reading if Supabase URL is unconfigured', async () => {
+    test('getReadingBySlugInternal returns static reading if Supabase URL is unconfigured', async () => {
       const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       delete process.env.NEXT_PUBLIC_SUPABASE_URL;
 
       try {
-        const reading = await getReadingBySlug('sholawat-wahidiyah');
+        const reading = await getReadingBySlugInternal('sholawat-wahidiyah');
         assert.notStrictEqual(reading, null);
         assert.strictEqual(reading?.slug, 'sholawat-wahidiyah');
       } finally {
@@ -301,12 +308,12 @@ describe('Reading Management & Configurable Counts Suite', () => {
       }
     });
 
-    test('getReadingsList returns fallback only when Supabase is completely unconfigured', async () => {
+    test('getReadingsListInternal returns fallback only when Supabase is completely unconfigured', async () => {
       const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       delete process.env.NEXT_PUBLIC_SUPABASE_URL;
 
       try {
-        const res = await getReadingsList(false);
+        const res = await getReadingsListInternal(false);
         assert.strictEqual(res.success, true);
         assert.strictEqual(res.isStaticFallback, true);
         assert.strictEqual((res.data?.length ?? 0) > 0, true);
@@ -317,7 +324,7 @@ describe('Reading Management & Configurable Counts Suite', () => {
   });
 
   describe('Mocked Database State & Fallback Prevention Tests', () => {
-    test('getReadingsList(false) returns empty active list without static fallback when DB has items but all are archived', async () => {
+    test('getReadingsListInternal(false) returns empty active list without static fallback when DB has items but all are archived', async () => {
       const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const origKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
       process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://fake-test.supabase.co';
@@ -345,7 +352,7 @@ describe('Reading Management & Configurable Counts Suite', () => {
           }),
         };
 
-        const res = await getReadingsList(false, {
+        const res = await getReadingsListInternal(false, {
           supabase: mockSessionClient,
           adminClient: mockAdminClient,
         });
@@ -362,7 +369,7 @@ describe('Reading Management & Configurable Counts Suite', () => {
       }
     });
 
-    test('getReadingBySlug returns null when reading is not found in session client and admin client is null', async () => {
+    test('getReadingBySlugInternal returns null when reading is not found in session client and admin client is null', async () => {
       const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const origKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
       process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://fake-test.supabase.co';
@@ -379,7 +386,7 @@ describe('Reading Management & Configurable Counts Suite', () => {
           }),
         };
 
-        const reading = await getReadingBySlug('sholawat-wahidiyah', {
+        const reading = await getReadingBySlugInternal('sholawat-wahidiyah', {
           supabase: mockSessionClient,
           adminClient: null,
         });
@@ -394,7 +401,7 @@ describe('Reading Management & Configurable Counts Suite', () => {
       }
     });
 
-    test('getReadingsList returns error and no static fallback when admin count check query fails', async () => {
+    test('getReadingsListInternal returns error and no static fallback when admin count check query fails', async () => {
       const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const origKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
       process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://fake-test.supabase.co';
@@ -409,7 +416,7 @@ describe('Reading Management & Configurable Counts Suite', () => {
           }),
         };
 
-        const res = await getReadingsList(false, {
+        const res = await getReadingsListInternal(false, {
           adminClient: mockAdminClient,
         });
 
