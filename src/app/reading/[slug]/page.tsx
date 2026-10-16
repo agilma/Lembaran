@@ -1,5 +1,5 @@
 import { redirect, notFound } from 'next/navigation';
-import { readingsData } from '@/data/readings';
+import { getReadingBySlug, getReadingsList } from '@/app/actions/reading-management-actions';
 
 interface Props {
   params: Promise<{
@@ -8,16 +8,18 @@ interface Props {
 }
 
 export async function generateStaticParams() {
-  return readingsData.map((reading) => ({
+  const response = await getReadingsList(false);
+  const readings = response.data || [];
+  return readings.map((reading) => ({
     slug: reading.slug,
   }));
 }
 
 export default async function ReadingLegacyDetailPage({ params }: Props) {
   const { slug } = await params;
-  const reading = readingsData.find((item) => item.slug === slug);
+  const reading = await getReadingBySlug(slug);
 
-  if (!reading) {
+  if (!reading || reading.isArchived) {
     notFound();
   }
 

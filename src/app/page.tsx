@@ -1,7 +1,12 @@
 import Link from 'next/link';
-import { readingsData } from '@/data/readings';
+import { getReadingsList } from '@/app/actions/reading-management-actions';
 
-export default function HomePage() {
+export const revalidate = 60; // Revalidate home page every 60 seconds
+
+export default async function HomePage() {
+  const response = await getReadingsList(false);
+  const readings = response.data || [];
+
   return (
     <div className="space-y-10">
       {/* Hero / Intro Section */}
@@ -29,12 +34,12 @@ export default function HomePage() {
             </p>
           </div>
           <span className="text-xs font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1 rounded-md border border-slate-200/50 dark:border-slate-700/50">
-            {readingsData.length} Bacaan
+            {readings.length} Bacaan
           </span>
         </div>
 
         <div className="divide-y divide-slate-200/80 dark:divide-slate-800 border-t border-b border-slate-200/80 dark:border-slate-800">
-          {readingsData.map((reading) => (
+          {readings.map((reading) => (
             <div
               key={reading.id}
               className="py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors -mx-4 px-4 rounded-lg"

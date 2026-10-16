@@ -19,7 +19,9 @@ export interface RecordCompletionResult {
 
 export interface ReadingProgressData {
   activeIndex: number;
+  activeSectionId?: string;
   counts: number[];
+  sectionCounts?: Record<string, number>;
   updatedAt?: string;
 }
 
@@ -32,7 +34,9 @@ export interface GetProgressResult {
 export interface SaveProgressParams {
   readingSlug: string;
   activeIndex: number;
+  activeSectionId?: string;
   counts: number[];
+  sectionCounts?: Record<string, number>;
 }
 
 export interface SaveProgressResult {
@@ -180,11 +184,32 @@ export async function getReadingProgress(
       return { success: true, data: null };
     }
 
+    let parsedCounts: number[] = [];
+    let parsedSectionCounts: Record<string, number> | undefined = undefined;
+    let parsedActiveSectionId: string | undefined = undefined;
+
+    if (Array.isArray(data.counts)) {
+      parsedCounts = data.counts;
+    } else if (data.counts && typeof data.counts === "object") {
+      const obj = data.counts as Record<string, unknown>;
+      if (Array.isArray(obj.counts)) {
+        parsedCounts = obj.counts as number[];
+      }
+      if (obj.sectionCounts && typeof obj.sectionCounts === "object") {
+        parsedSectionCounts = obj.sectionCounts as Record<string, number>;
+      }
+      if (typeof obj.activeSectionId === "string") {
+        parsedActiveSectionId = obj.activeSectionId;
+      }
+    }
+
     return {
       success: true,
       data: {
         activeIndex: data.active_index,
-        counts: Array.isArray(data.counts) ? data.counts : [],
+        activeSectionId: parsedActiveSectionId,
+        counts: parsedCounts,
+        sectionCounts: parsedSectionCounts,
         updatedAt: data.updated_at,
       },
     };
@@ -222,12 +247,21 @@ export async function saveReadingProgress(
 
     const updatedAt = new Date().toISOString();
 
+    const countsPayload =
+      params.sectionCounts || params.activeSectionId
+        ? {
+            counts: params.counts,
+            sectionCounts: params.sectionCounts,
+            activeSectionId: params.activeSectionId,
+          }
+        : params.counts;
+
     const { error } = await supabase.from("reading_progress").upsert(
       {
         user_id: user.id,
         reading_slug: params.readingSlug,
         active_index: params.activeIndex,
-        counts: params.counts,
+        counts: countsPayload,
         updated_at: updatedAt,
       },
       { onConflict: "user_id,reading_slug" }
@@ -376,6 +410,16 @@ export async function getReadingHistory(): Promise<GetReadingHistoryResult> {
     // Title map helper
     const titleMap = new Map<string, string>();
     readingsData.forEach((r) => titleMap.set(r.slug, r.title));
+
+    // Also populate titleMap from database (including archived readings)
+    try {
+      const { data: dbReadings } = await supabase.from("readings").select("slug, title");
+      if (dbReadings) {
+        dbReadings.forEach((r) => titleMap.set(r.slug, r.title));
+      }
+    } catch {
+      // Ignore DB title map error, static fallback already set
+    }
 
     const completions: CompletionRecordItem[] = data.map((item) => {
       const readingTitle = titleMap.get(item.reading_slug) || item.reading_slug;
