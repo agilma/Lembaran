@@ -2,6 +2,7 @@ import { ReadingSection } from "@/types/reading";
 
 export interface SavedReadingProgress {
   activeIndex: number;
+  activeSectionId?: string;
   counts: number[];
   sectionCounts?: Record<string, number>;
   updatedAt?: string;
@@ -9,7 +10,7 @@ export interface SavedReadingProgress {
 
 /**
  * Safely parses and validates arbitrary progress data (from localStorage or Supabase).
- * Supports both section ID mapping (`sectionCounts`) and legacy array index mapping (`counts`).
+ * Supports both section ID mapping (`sectionCounts`, `activeSectionId`) and legacy array index mapping.
  */
 export function parseProgressData(
   data: unknown,
@@ -24,6 +25,11 @@ export function parseProgressData(
   if (sectionsCount <= 0) return null;
 
   const savedIndex = obj.activeIndex;
+  const savedSectionId =
+    typeof obj.activeSectionId === "string" && obj.activeSectionId.trim().length > 0
+      ? obj.activeSectionId.trim()
+      : undefined;
+
   const savedCounts = obj.counts;
   const savedSectionCounts =
     obj.sectionCounts && typeof obj.sectionCounts === "object"
@@ -31,14 +37,37 @@ export function parseProgressData(
       : null;
   const updatedAt = typeof obj.updatedAt === "string" ? obj.updatedAt : undefined;
 
+  // Determine activeIndex based on activeSectionId lookup or fallback to savedIndex
   let validIndex = 0;
-  if (
+  let resolvedSectionId: string | undefined = savedSectionId;
+
+  if (savedSectionId && sectionsList.length > 0) {
+    const foundIdx = sectionsList.findIndex((sec) => sec.id === savedSectionId);
+    if (foundIdx !== -1) {
+      validIndex = foundIdx;
+    } else {
+      // Saved section ID was removed or reordered out of scope: fallback to savedIndex if valid
+      if (
+        typeof savedIndex === "number" &&
+        Number.isInteger(savedIndex) &&
+        savedIndex >= 0 &&
+        savedIndex < sectionsCount
+      ) {
+        validIndex = savedIndex;
+        resolvedSectionId = sectionsList[savedIndex]?.id;
+      } else {
+        validIndex = 0;
+        resolvedSectionId = sectionsList[0]?.id;
+      }
+    }
+  } else if (
     typeof savedIndex === "number" &&
     Number.isInteger(savedIndex) &&
     savedIndex >= 0 &&
     savedIndex < sectionsCount
   ) {
     validIndex = savedIndex;
+    resolvedSectionId = sectionsList[savedIndex]?.id;
   }
 
   const validCounts = new Array(sectionsCount).fill(0);
@@ -73,6 +102,7 @@ export function parseProgressData(
 
   return {
     activeIndex: validIndex,
+    ...(resolvedSectionId ? { activeSectionId: resolvedSectionId } : {}),
     counts: validCounts,
     ...(hasSectionCounts ? { sectionCounts: normalizedSectionCounts } : {}),
     updatedAt,

@@ -182,58 +182,79 @@ describe('Reading Management & Configurable Counts Suite', () => {
     });
   });
 
-  describe('Section ID Progress Mapping & Reordering Compatibility', () => {
-    test('section ID mapping maintains correct counts even when sections are reordered', () => {
-      const originalSections: ReadingSection[] = [
-        { id: 'sec-a', instruction: 'Bagian A', repeatCount: 7 },
-        { id: 'sec-b', instruction: 'Bagian B', repeatCount: 33 },
-      ];
-
-      const savedDataWithSectionCounts = {
-        activeIndex: 0,
-        counts: [7, 33],
-        sectionCounts: {
-          'sec-a': 7,
-          'sec-b': 33,
-        },
-      };
-
-      // Reordered sections (Bagian B is now first)
+  describe('Section ID Progress Mapping & activeSectionId Position Preservation', () => {
+    test('activeSectionId correctly updates activeIndex when sections are reordered', () => {
+      // Original order: [sec-1, sec-2, sec-3], active was sec-2 (index 1)
       const reorderedSections: ReadingSection[] = [
-        { id: 'sec-b', instruction: 'Bagian B', repeatCount: 33 },
-        { id: 'sec-a', instruction: 'Bagian A', repeatCount: 7 },
+        { id: 'sec-3', instruction: 'Bagian C' },
+        { id: 'sec-2', instruction: 'Bagian B' },
+        { id: 'sec-1', instruction: 'Bagian A' },
       ];
 
-      const parsedReordered = parseProgressData(savedDataWithSectionCounts, reorderedSections);
-
-      assert.notStrictEqual(parsedReordered, null);
-      // Index 0 (sec-b) should receive count 33
-      assert.strictEqual(parsedReordered?.counts[0], 33);
-      // Index 1 (sec-a) should receive count 7
-      assert.strictEqual(parsedReordered?.counts[1], 7);
-    });
-
-    test('parses progress JSONB payload containing sectionCounts object correctly', () => {
-      const sections: ReadingSection[] = [
-        { id: 'sw-1', instruction: 'Fatihah 7x' },
-        { id: 'sw-2', instruction: 'Tasbih 100x' },
-      ];
-
-      const jsonbPayload = {
-        counts: [7, 100],
+      const savedData = {
+        activeIndex: 1,
+        activeSectionId: 'sec-2',
+        counts: [0, 5, 0],
         sectionCounts: {
-          'sw-1': 7,
-          'sw-2': 100,
+          'sec-1': 0,
+          'sec-2': 5,
+          'sec-3': 0,
         },
       };
 
-      const parsed = parseProgressData(jsonbPayload, sections);
+      const parsed = parseProgressData(savedData, reorderedSections);
 
       assert.notStrictEqual(parsed, null);
-      assert.strictEqual(parsed?.counts[0], 7);
-      assert.strictEqual(parsed?.counts[1], 100);
-      assert.strictEqual(parsed?.sectionCounts?.['sw-1'], 7);
-      assert.strictEqual(parsed?.sectionCounts?.['sw-2'], 100);
+      // 'sec-2' is now at index 1 in reordered list
+      assert.strictEqual(parsed?.activeIndex, 1);
+      assert.strictEqual(parsed?.activeSectionId, 'sec-2');
+      assert.strictEqual(parsed?.counts[1], 5);
+    });
+
+    test('reloads position correctly when active section moves to different index', () => {
+      const reorderedSections: ReadingSection[] = [
+        { id: 'sec-2', instruction: 'Bagian B' }, // Moved to index 0
+        { id: 'sec-1', instruction: 'Bagian A' }, // Moved to index 1
+      ];
+
+      const savedData = {
+        activeIndex: 1, // Was at index 1 originally
+        activeSectionId: 'sec-2', // Pointed to sec-2
+        counts: [10, 25],
+        sectionCounts: {
+          'sec-1': 10,
+          'sec-2': 25,
+        },
+      };
+
+      const parsed = parseProgressData(savedData, reorderedSections);
+
+      assert.notStrictEqual(parsed, null);
+      // 'sec-2' is now index 0!
+      assert.strictEqual(parsed?.activeIndex, 0);
+      assert.strictEqual(parsed?.counts[0], 25);
+      assert.strictEqual(parsed?.counts[1], 10);
+    });
+
+    test('falls back safely to valid index if activeSectionId is missing or removed', () => {
+      const sections: ReadingSection[] = [
+        { id: 'sec-a', instruction: 'Bagian A' },
+        { id: 'sec-b', instruction: 'Bagian B' },
+      ];
+
+      // Saved activeSectionId 'sec-deleted' was removed
+      const dataWithDeletedSection = {
+        activeIndex: 1,
+        activeSectionId: 'sec-deleted',
+        counts: [2, 4],
+      };
+
+      const parsed = parseProgressData(dataWithDeletedSection, sections);
+
+      assert.notStrictEqual(parsed, null);
+      // Fallback to valid savedIndex 1
+      assert.strictEqual(parsed?.activeIndex, 1);
+      assert.strictEqual(parsed?.counts[1], 4);
     });
 
     test('falls back safely to array index counts for legacy progress data', () => {
@@ -260,7 +281,6 @@ describe('Reading Management & Configurable Counts Suite', () => {
 
   describe('Server Safety & Admin Client Checks', () => {
     test('deleteReading returns explicit error if SUPABASE_SECRET_KEY/Admin Client is not available', async () => {
-      // Temporarily clear SUPABASE_SECRET_KEY
       const origSecret = process.env.SUPABASE_SECRET_KEY;
       delete process.env.SUPABASE_SECRET_KEY;
 

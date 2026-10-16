@@ -113,6 +113,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
 
     const storageKey = `lembaran_progress_${reading.slug}`;
 
+    const activeSecId = sections[activeIndex]?.id;
     const sectionCounts: Record<string, number> = {};
     sections.forEach((sec, idx) => {
       if (sec.id) {
@@ -125,6 +126,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
         storageKey,
         JSON.stringify({
           activeIndex,
+          activeSectionId: activeSecId,
           counts,
           sectionCounts,
           updatedAt: new Date().toISOString(),
@@ -137,6 +139,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
     saveReadingProgress({
       readingSlug: reading.slug,
       activeIndex,
+      activeSectionId: activeSecId,
       counts,
       sectionCounts,
     }).catch((err) => {
@@ -150,6 +153,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
 
       const storageKey = `lembaran_progress_${reading.slug}`;
 
+      const activeSecId = sections[newIndex]?.id;
       const sectionCounts: Record<string, number> = {};
       sections.forEach((sec, idx) => {
         if (sec.id) {
@@ -163,6 +167,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
           storageKey,
           JSON.stringify({
             activeIndex: newIndex,
+            activeSectionId: activeSecId,
             counts: newCounts,
             sectionCounts,
             updatedAt: new Date().toISOString(),
@@ -176,6 +181,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
       saveReadingProgress({
         readingSlug: reading.slug,
         activeIndex: newIndex,
+        activeSectionId: activeSecId,
         counts: newCounts,
         sectionCounts,
       }).catch((err) => {
