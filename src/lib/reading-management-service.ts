@@ -67,10 +67,12 @@ export async function getReadingsListInternal(
     }
 
     const adminClient =
-      overrides?.adminClient !== undefined ? overrides.adminClient : getSupabaseAdminClient();
+      includeArchived
+        ? (overrides?.adminClient !== undefined ? overrides.adminClient : getSupabaseAdminClient())
+        : null;
 
-    // Check total row count in DB table strictly using adminClient (bypassing session RLS)
-    if (adminClient) {
+    // Check total row count in DB table strictly using adminClient (bypassing session RLS) when includeArchived is requested
+    if (includeArchived && adminClient) {
       const { count, error: countErr } = await adminClient
         .from("readings")
         .select("id", { count: "exact", head: true });
@@ -189,8 +191,8 @@ export async function getReadingBySlugInternal(
       return mapped;
     }
 
-    // If reading was not found, check if DB table is confirmed completely empty (0 rows) using adminClient.
-    if (adminClient) {
+    // For authorized editor/admin requests (includeArchived = true), check if DB table is confirmed completely empty (0 rows) using adminClient.
+    if (includeArchived && adminClient) {
       const { count, error: countErr } = await adminClient
         .from("readings")
         .select("id", { count: "exact", head: true });
@@ -202,7 +204,7 @@ export async function getReadingBySlugInternal(
       }
     }
 
-    // Database is configured and has readings (or adminClient is unavailable): slug is truly missing, archived, or deleted.
+    // Database is configured and has readings (or public query returned no row): slug is missing, archived, or deleted.
     // Return null (DO NOT revive archived/non-existent readings via static fallback)
     return null;
   } catch (err) {
