@@ -1,5 +1,5 @@
 import { requireRole, getCurrentUser } from "@/lib/auth-utils";
-import { createClient, getSupabaseAdminClient } from "@/lib/supabase/server";
+import { createClient, getSupabaseAdminClient, getSupabasePublicClient } from "@/lib/supabase/server";
 import { Role } from "@/types/user";
 import { Reading } from "@/types/reading";
 import { readingsData } from "@/data/readings";
@@ -98,7 +98,8 @@ export async function getReadingsListInternal(
 
     // Query active or all readings
     const supabase =
-      overrides?.supabase || ((includeArchived && adminClient) ? adminClient : await createClient());
+      overrides?.supabase ||
+      (includeArchived ? (adminClient || (await createClient())) : (getSupabasePublicClient() || (await createClient())));
 
     let query = supabase.from("readings").select("*").order("created_at", { ascending: true });
 
@@ -144,7 +145,9 @@ export async function getReadingBySlugInternal(
 
     const adminClient =
       overrides?.adminClient !== undefined ? overrides.adminClient : getSupabaseAdminClient();
-    const supabase = overrides?.supabase || adminClient || (await createClient());
+    const supabase =
+      overrides?.supabase ||
+      (includeArchived ? (adminClient || (await createClient())) : (getSupabasePublicClient() || adminClient || (await createClient())));
 
     let query = supabase.from("readings").select("*").eq("slug", slug);
     if (!includeArchived) {

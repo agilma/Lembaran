@@ -28,6 +28,32 @@ export async function createClient() {
 }
 
 /**
+ * Public stateless client for unauthenticated read-only operations (e.g. SSG / static page generation).
+ * Does NOT access `cookies()` from `next/headers` to prevent runtime dynamic errors.
+ */
+let publicClientInstance: SupabaseClient | null = null;
+
+export function getSupabasePublicClient(): SupabaseClient | null {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !anonKey) {
+    return null;
+  }
+
+  if (!publicClientInstance) {
+    publicClientInstance = createSupabaseJsClient(supabaseUrl, anonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+  }
+
+  return publicClientInstance;
+}
+
+/**
  * Service role / secret client for server-only trusted administrative operations.
  * DO NOT expose to client or use to bypass RLS for standard user actions.
  */
