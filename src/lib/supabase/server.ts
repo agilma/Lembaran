@@ -32,16 +32,23 @@ export async function createClient() {
  * Does NOT access `cookies()` from `next/headers` to prevent runtime dynamic errors.
  */
 let publicClientInstance: SupabaseClient | null = null;
+let publicClientUrl: string | null = null;
+let publicClientKey: string | null = null;
 
 export function getSupabasePublicClient(): SupabaseClient | null {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !anonKey) {
+    publicClientInstance = null;
+    publicClientUrl = null;
+    publicClientKey = null;
     return null;
   }
 
-  if (!publicClientInstance) {
+  if (!publicClientInstance || publicClientUrl !== supabaseUrl || publicClientKey !== anonKey) {
+    publicClientUrl = supabaseUrl;
+    publicClientKey = anonKey;
     publicClientInstance = createSupabaseJsClient(supabaseUrl, anonKey, {
       auth: {
         persistSession: false,
@@ -58,16 +65,23 @@ export function getSupabasePublicClient(): SupabaseClient | null {
  * DO NOT expose to client or use to bypass RLS for standard user actions.
  */
 let adminClientInstance: SupabaseClient | null = null;
+let adminClientUrl: string | null = null;
+let adminClientKey: string | null = null;
 
 export function getSupabaseAdminClient(): SupabaseClient | null {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const secretKey = process.env.SUPABASE_SECRET_KEY;
 
   if (!supabaseUrl || !secretKey) {
+    adminClientInstance = null;
+    adminClientUrl = null;
+    adminClientKey = null;
     return null;
   }
 
-  if (!adminClientInstance) {
+  if (!adminClientInstance || adminClientUrl !== supabaseUrl || adminClientKey !== secretKey) {
+    adminClientUrl = supabaseUrl;
+    adminClientKey = secretKey;
     adminClientInstance = createSupabaseJsClient(supabaseUrl, secretKey, {
       auth: {
         persistSession: false,
