@@ -1,5 +1,5 @@
 import { requireRole, getCurrentUser } from "@/lib/auth-utils";
-import { createClient, getSupabaseAdminClient } from "@/lib/supabase/server";
+import { createClient, getSupabaseAdminClient, getSupabasePublicClient } from "@/lib/supabase/server";
 import { Role } from "@/types/user";
 import { Reading } from "@/types/reading";
 import { readingsData } from "@/data/readings";
@@ -67,10 +67,12 @@ export async function getReadingsListInternal(
     }
 
     const adminClient =
-      overrides?.adminClient !== undefined ? overrides.adminClient : getSupabaseAdminClient();
+      includeArchived
+        ? (overrides?.adminClient !== undefined ? overrides.adminClient : getSupabaseAdminClient())
+        : null;
 
-    // Check total row count in DB table strictly using adminClient (bypassing session RLS)
-    if (adminClient) {
+    // Check total row count in DB table strictly using adminClient (bypassing session RLS) when includeArchived is requested
+    if (includeArchived && adminClient) {
       const { count, error: countErr } = await adminClient
         .from("readings")
         .select("id", { count: "exact", head: true });
@@ -98,7 +100,20 @@ export async function getReadingsListInternal(
 
     // Query active or all readings
     const supabase =
-      overrides?.supabase || ((includeArchived && adminClient) ? adminClient : await createClient());
+      overrides?.supabase ||
+      (includeArchived
+        ? (adminClient || (await createClient()))
+        : getSupabasePublicClient());
+
+    if (!supabase) {
+      const staticReadings = readingsData.map((r) => ({ ...r, isArchived: false }));
+      return {
+        success: true,
+        message: "Supabase client publik tidak tersedia. Memuat data bawaan.",
+        data: staticReadings,
+        isStaticFallback: true,
+      };
+    }
 
     let query = supabase.from("readings").select("*").order("created_at", { ascending: true });
 
@@ -144,7 +159,17 @@ export async function getReadingBySlugInternal(
 
     const adminClient =
       overrides?.adminClient !== undefined ? overrides.adminClient : getSupabaseAdminClient();
-    const supabase = overrides?.supabase || adminClient || (await createClient());
+    const supabase =
+      overrides?.supabase ||
+      (includeArchived
+        ? (adminClient || (await createClient()))
+        : getSupabasePublicClient());
+
+    if (!supabase) {
+      const staticReading = readingsData.find((r) => r.slug === slug);
+      if (!staticReading) return null;
+      return { ...staticReading, isArchived: false };
+    }
 
     let query = supabase.from("readings").select("*").eq("slug", slug);
     if (!includeArchived) {
@@ -166,8 +191,8 @@ export async function getReadingBySlugInternal(
       return mapped;
     }
 
-    // If reading was not found, check if DB table is confirmed completely empty (0 rows) using adminClient.
-    if (adminClient) {
+    // For authorized editor/admin requests (includeArchived = true), check if DB table is confirmed completely empty (0 rows) using adminClient.
+    if (includeArchived && adminClient) {
       const { count, error: countErr } = await adminClient
         .from("readings")
         .select("id", { count: "exact", head: true });
@@ -179,7 +204,7 @@ export async function getReadingBySlugInternal(
       }
     }
 
-    // Database is configured and has readings (or adminClient is unavailable): slug is truly missing, archived, or deleted.
+    // Database is configured and has readings (or public query returned no row): slug is missing, archived, or deleted.
     // Return null (DO NOT revive archived/non-existent readings via static fallback)
     return null;
   } catch (err) {

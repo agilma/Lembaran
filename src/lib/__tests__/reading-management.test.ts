@@ -13,6 +13,7 @@ import {
   getReadingBySlugInternal,
   getReadingsListInternal,
 } from '../reading-management-service';
+import { getSupabasePublicClient } from '../supabase/server';
 
 describe('Reading Management & Configurable Counts Suite', () => {
   describe('Input Validation & repeatCount Normalization', () => {
@@ -356,6 +357,115 @@ describe('Reading Management & Configurable Counts Suite', () => {
       }
     });
 
+    test('getSupabasePublicClient returns client without accessing cookies or adminClient', () => {
+      const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const origKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+      try {
+        // When env vars are missing -> returns null
+        delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+        delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+        assert.strictEqual(getSupabasePublicClient(), null);
+
+        // When env vars are present -> returns stateless client instance
+        process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://fake-test.supabase.co';
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'fake-anon-key';
+        const client = getSupabasePublicClient();
+        assert.notStrictEqual(client, null);
+      } finally {
+        if (origUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = origUrl;
+        else delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+        if (origKey) process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = origKey;
+        else delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      }
+    });
+
+    test('public reading retrieval uses getSupabasePublicClient in actual code path without overrides and never invokes adminClient.from()', async () => {
+      const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const origKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      const origFetch = globalThis.fetch;
+
+      process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://fake-test.supabase.co';
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'fake-anon-key';
+
+      // Mock global fetch to return empty query result quickly without network delay
+      globalThis.fetch = async () => new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      try {
+        let adminClientCalled = false;
+        const mockAdminClient = {
+          from: () => {
+            adminClientCalled = true;
+            return {
+              select: () => ({
+                eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }),
+              }),
+            };
+          },
+        };
+
+        // Call getReadingBySlugInternal and getReadingsListInternal WITHOUT overrides.supabase (testing actual getSupabasePublicClient code path)
+        // Passes adminClient spy in overrides to prove it is NEVER touched for public reads
+        const readingPromise = getReadingBySlugInternal('sholawat-wahidiyah', false, {
+          adminClient: mockAdminClient,
+        });
+
+        const listPromise = getReadingsListInternal(false, {
+          adminClient: mockAdminClient,
+        });
+
+        await Promise.all([readingPromise, listPromise]);
+
+        // Verify that adminClient.from() was never called
+        assert.strictEqual(adminClientCalled, false);
+      } finally {
+        globalThis.fetch = origFetch;
+        if (origUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = origUrl;
+        else delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+        if (origKey) process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = origKey;
+        else delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      }
+    });
+
+    test('public reading retrieval uses getSupabasePublicClient and does not fallback to adminClient when public client is unavailable', async () => {
+      const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const origKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+      delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+      try {
+        let adminClientQueriedForPublicData = false;
+        const mockAdminClient = {
+          from: () => {
+            adminClientQueriedForPublicData = true;
+            return {
+              select: () => ({
+                eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }),
+              }),
+            };
+          },
+        };
+
+        // Call public reading fetch without overrides.supabase or public client config
+        const reading = await getReadingBySlugInternal('sholawat-wahidiyah', false, {
+          adminClient: mockAdminClient,
+        });
+
+        // Should return static fallback because env is unconfigured, without querying admin client for public data
+        assert.notStrictEqual(reading, null);
+        assert.strictEqual(reading?.slug, 'sholawat-wahidiyah');
+        assert.strictEqual(adminClientQueriedForPublicData, false);
+      } finally {
+        if (origUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = origUrl;
+        if (origKey) process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = origKey;
+      }
+    });
+
     test('getReadingsListInternal returns fallback only when Supabase is completely unconfigured', async () => {
       const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       delete process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -449,23 +559,25 @@ describe('Reading Management & Configurable Counts Suite', () => {
       }
     });
 
-    test('getReadingsListInternal returns error and no static fallback when admin count check query fails', async () => {
+    test('getReadingsListInternal returns error and no static fallback when database query fails', async () => {
       const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const origKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
       process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://fake-test.supabase.co';
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'fake-anon-key';
 
       try {
-        const mockAdminClient = {
+        const mockPublicClient = {
           from: (_table: string) => ({
-            select: (_cols?: string, _opts?: { count?: string; head?: boolean }) => {
-              return Promise.resolve({ count: null, error: { message: 'Database connection timeout' } });
-            },
+            select: (_cols?: string) => ({
+              order: (_col?: string) => ({
+                eq: (_c?: string, _v?: boolean) => Promise.resolve({ data: null, error: { message: 'Database connection timeout' } }),
+              }),
+            }),
           }),
         };
 
         const res = await getReadingsListInternal(false, {
-          adminClient: mockAdminClient,
+          supabase: mockPublicClient,
         });
 
         assert.strictEqual(res.success, false);
