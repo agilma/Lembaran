@@ -99,7 +99,19 @@ export async function getReadingsListInternal(
     // Query active or all readings
     const supabase =
       overrides?.supabase ||
-      (includeArchived ? (adminClient || (await createClient())) : (getSupabasePublicClient() || (await createClient())));
+      (includeArchived
+        ? (adminClient || (await createClient()))
+        : getSupabasePublicClient());
+
+    if (!supabase) {
+      const staticReadings = readingsData.map((r) => ({ ...r, isArchived: false }));
+      return {
+        success: true,
+        message: "Supabase client publik tidak tersedia. Memuat data bawaan.",
+        data: staticReadings,
+        isStaticFallback: true,
+      };
+    }
 
     let query = supabase.from("readings").select("*").order("created_at", { ascending: true });
 
@@ -147,7 +159,15 @@ export async function getReadingBySlugInternal(
       overrides?.adminClient !== undefined ? overrides.adminClient : getSupabaseAdminClient();
     const supabase =
       overrides?.supabase ||
-      (includeArchived ? (adminClient || (await createClient())) : (getSupabasePublicClient() || adminClient || (await createClient())));
+      (includeArchived
+        ? (adminClient || (await createClient()))
+        : getSupabasePublicClient());
+
+    if (!supabase) {
+      const staticReading = readingsData.find((r) => r.slug === slug);
+      if (!staticReading) return null;
+      return { ...staticReading, isArchived: false };
+    }
 
     let query = supabase.from("readings").select("*").eq("slug", slug);
     if (!includeArchived) {

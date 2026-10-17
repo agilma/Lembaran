@@ -356,6 +356,40 @@ describe('Reading Management & Configurable Counts Suite', () => {
       }
     });
 
+    test('public reading retrieval uses getSupabasePublicClient and does not fallback to adminClient when public client is unavailable', async () => {
+      const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const origKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+      delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+      try {
+        let adminClientQueriedForPublicData = false;
+        const mockAdminClient = {
+          from: () => {
+            adminClientQueriedForPublicData = true;
+            return {
+              select: () => ({
+                eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }),
+              }),
+            };
+          },
+        };
+
+        // Call public reading fetch without overrides.supabase or public client config
+        const reading = await getReadingBySlugInternal('sholawat-wahidiyah', false, {
+          adminClient: mockAdminClient,
+        });
+
+        // Should return static fallback because env is unconfigured, without querying admin client for public data
+        assert.notStrictEqual(reading, null);
+        assert.strictEqual(reading?.slug, 'sholawat-wahidiyah');
+        assert.strictEqual(adminClientQueriedForPublicData, false);
+      } finally {
+        if (origUrl) process.env.NEXT_PUBLIC_SUPABASE_URL = origUrl;
+        if (origKey) process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = origKey;
+      }
+    });
+
     test('getReadingsListInternal returns fallback only when Supabase is completely unconfigured', async () => {
       const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       delete process.env.NEXT_PUBLIC_SUPABASE_URL;
