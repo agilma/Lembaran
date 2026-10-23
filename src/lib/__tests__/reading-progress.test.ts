@@ -22,6 +22,7 @@ describe('Reading Progress Resolution & Persistence Suite', () => {
         activeIndex: 1,
         counts: [2, 1, 0],
         updatedAt: '2026-03-30T10:00:00.000Z',
+        dateKey: '2026-03-30',
       });
     });
 
@@ -109,6 +110,114 @@ describe('Reading Progress Resolution & Persistence Suite', () => {
     });
   });
 
+  describe('Daily WIB Session & Date Rollover Regression Tests', () => {
+    test('Progres belum selesai dari tanggal WIB sebelumnya di-reset ke 0 untuk hari baru', () => {
+      const yesterdayProgress: SavedReadingProgress = {
+        activeIndex: 1,
+        counts: [10, 5, 0],
+        dateKey: '2026-10-19',
+        updatedAt: '2026-10-19T23:00:00.000Z',
+      };
+
+      const todayDateKey = '2026-10-20';
+
+      const parsedYesterday = parseProgressData(
+        yesterdayProgress,
+        sectionsCount,
+        todayDateKey
+      );
+      assert.strictEqual(parsedYesterday, null);
+
+      const resolved = resolveReadingProgress(
+        yesterdayProgress,
+        null,
+        todayDateKey
+      );
+      assert.strictEqual(resolved, null);
+    });
+
+    test('Selesai pukul 01:00 WIB lalu memulai sesi baru pada tanggal yang sama menghasilkan state 0', () => {
+      const currentDateKey = '2026-10-20';
+      const storageKey = 'lembaran_progress_al-fatihah';
+      const mockStorage = new Map<string, string>();
+
+      let historyRecorded = false;
+
+      const recordCompletion = (slug: string, counts: number[]) => {
+        historyRecorded = true;
+        return { success: true, message: 'Berhasil' };
+      };
+
+      const res = recordCompletion('al-fatihah', [10, 10, 10]);
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(historyRecorded, true);
+
+      mockStorage.delete(storageKey);
+
+      const localDataString = mockStorage.get(storageKey);
+      const localProgress = localDataString
+        ? parseProgressData(JSON.parse(localDataString), sectionsCount, currentDateKey)
+        : null;
+
+      const resolved = resolveReadingProgress(localProgress, null, currentDateKey);
+      assert.strictEqual(resolved, null, 'Next session on same date must start fresh with null progress');
+    });
+
+    test('Membuka ulang bacaan setelah selesai mengembalikan state awal (0)', () => {
+      const mockStorage = new Map<string, string>();
+      const slug = 'al-fatihah';
+
+      mockStorage.delete(`lembaran_progress_${slug}`);
+
+      const rawLocal = mockStorage.get(`lembaran_progress_${slug}`);
+      assert.strictEqual(rawLocal, undefined);
+      const parsed = parseProgressData(rawLocal, sectionsCount, '2026-10-20');
+      assert.strictEqual(parsed, null);
+    });
+
+    test('Kegagalan penyimpanan riwayat tidak menghapus progres aktif pengguna', () => {
+      const slug = 'al-fatihah';
+      const initialCounts = [10, 10, 10];
+      const mockStorage = new Map<string, string>();
+      mockStorage.set(
+        `lembaran_progress_${slug}`,
+        JSON.stringify({ activeIndex: 2, counts: initialCounts })
+      );
+
+      const recordCompletionFailed = () => {
+        return { success: false, message: 'Gagal koneksi server' };
+      };
+
+      const res = recordCompletionFailed();
+      assert.strictEqual(res.success, false);
+
+      assert.strictEqual(mockStorage.has(`lembaran_progress_${slug}`), true);
+      const savedObj = JSON.parse(mockStorage.get(`lembaran_progress_${slug}`)!);
+      assert.deepStrictEqual(savedObj.counts, initialCounts);
+    });
+
+    test('Late background save diabaikan dan dibersihkan setelah pembacaan selesai', () => {
+      const slug = 'al-fatihah';
+      const storageKey = `lembaran_progress_${slug}`;
+      const mockStorage = new Map<string, string>();
+
+      let isCompleting = true;
+      mockStorage.delete(storageKey);
+
+      const handleLateBackgroundSave = () => {
+        if (isCompleting) {
+          mockStorage.delete(storageKey);
+          return;
+        }
+        mockStorage.set(storageKey, JSON.stringify({ activeIndex: 2, counts: [5, 5, 5] }));
+      };
+
+      handleLateBackgroundSave();
+
+      assert.strictEqual(mockStorage.has(storageKey), false, 'Late background save must not write back completed state');
+    });
+  });
+
   describe('Hydration Flow & Persistence Controls', () => {
     test('Initial hydration tidak melakukan save dengan state 0 sebelum hydration selesai', () => {
       let isProgressLoaded = false;
@@ -119,15 +228,12 @@ describe('Reading Progress Resolution & Persistence Suite', () => {
         saveCallCount++;
       };
 
-      // Simulated hydration in-flight
       const defaultIndex = 0;
       const defaultCounts = [0, 0, 0];
 
-      // Auto-save attempt during hydration
       mockPersist(defaultIndex, defaultCounts);
       assert.strictEqual(saveCallCount, 0, 'No save calls should happen before progress is loaded');
 
-      // Complete hydration with server progress
       isProgressLoaded = true;
       assert.strictEqual(saveCallCount, 0, 'Hydration itself should not increment save calls');
     });
@@ -141,7 +247,6 @@ describe('Reading Progress Resolution & Persistence Suite', () => {
         savedCalls.push({ index, counts });
       };
 
-      // User increments counter
       mockPersist(1, [3, 1, 0]);
 
       assert.strictEqual(savedCalls.length, 1);

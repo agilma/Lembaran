@@ -14,6 +14,7 @@ import {
   parseProgressData,
   resolveReadingProgress,
 } from '@/lib/reading-progress';
+import { getJakartaDateComponents } from '@/lib/date-utils';
 
 interface ReadingViewProps {
   reading: Reading;
@@ -28,9 +29,12 @@ export function ReadingView({ reading }: ReadingViewProps) {
     new Array(sections.length).fill(0)
   );
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
+  const [isSubmittingCompletion, setIsSubmittingCompletion] = useState<boolean>(false);
+  const [completionError, setCompletionError] = useState<string | null>(null);
   const [isTranslationExpanded, setIsTranslationExpanded] = useState<boolean>(false);
   const [isProgressLoaded, setIsProgressLoaded] = useState<boolean>(false);
   const readerRef = useRef<HTMLDivElement>(null);
+  const isCompletingRef = useRef<boolean>(false);
 
   const scrollToReader = useCallback(() => {
     if (readerRef.current) {
@@ -53,6 +57,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
       }
 
       const storageKey = `lembaran_progress_${reading.slug}`;
+      const currentDateKey = getJakartaDateComponents().isoDateKey;
 
       // 1. Read progress from localStorage
       let localProgress: SavedReadingProgress | null = null;
@@ -60,7 +65,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
         const localDataString = localStorage.getItem(storageKey);
         if (localDataString) {
           const parsed = JSON.parse(localDataString);
-          localProgress = parseProgressData(parsed, sections);
+          localProgress = parseProgressData(parsed, sections, currentDateKey);
         }
       } catch (e) {
         console.error('Failed to read or parse local reading progress:', e);
@@ -71,7 +76,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
       try {
         const res = await getReadingProgress(reading.slug);
         if (res.success && res.data) {
-          serverProgress = parseProgressData(res.data, sections);
+          serverProgress = parseProgressData(res.data, sections, currentDateKey);
         }
       } catch (err) {
         console.error('Error fetching server reading progress:', err);
@@ -80,7 +85,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
       if (!isSubscribed) return;
 
       // 3. Determine which progress to use
-      const chosenProgress = resolveReadingProgress(localProgress, serverProgress);
+      const chosenProgress = resolveReadingProgress(localProgress, serverProgress, currentDateKey);
 
       // 4. Set activeIndex and counts
       if (chosenProgress) {
@@ -109,9 +114,10 @@ export function ReadingView({ reading }: ReadingViewProps) {
 
   // Auto-save progress on activeIndex or counts update whenever state changes after hydration
   useEffect(() => {
-    if (!isProgressLoaded || isCompleted || sections.length === 0) return;
+    if (!isProgressLoaded || isCompleted || isCompletingRef.current || sections.length === 0) return;
 
     const storageKey = `lembaran_progress_${reading.slug}`;
+    const currentDateKey = getJakartaDateComponents().isoDateKey;
 
     const activeSecId = sections[activeIndex]?.id;
     const sectionCounts: Record<string, number> = {};
@@ -129,6 +135,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
           activeSectionId: activeSecId,
           counts,
           sectionCounts,
+          dateKey: currentDateKey,
           updatedAt: new Date().toISOString(),
         })
       );
@@ -142,16 +149,27 @@ export function ReadingView({ reading }: ReadingViewProps) {
       activeSectionId: activeSecId,
       counts,
       sectionCounts,
-    }).catch((err) => {
-      console.error('Background progress save error:', err);
-    });
+      dateKey: currentDateKey,
+    })
+      .then(() => {
+        if (isCompletingRef.current) {
+          deleteReadingProgress(reading.slug).catch(() => {});
+          try {
+            localStorage.removeItem(storageKey);
+          } catch {}
+        }
+      })
+      .catch((err) => {
+        console.error('Background progress save error:', err);
+      });
   }, [activeIndex, counts, isProgressLoaded, isCompleted, reading.slug, sections]);
 
   const persistProgress = useCallback(
     (newIndex: number, newCounts: number[]) => {
-      if (!isProgressLoaded || isCompleted || sections.length === 0) return;
+      if (!isProgressLoaded || isCompleted || isCompletingRef.current || sections.length === 0) return;
 
       const storageKey = `lembaran_progress_${reading.slug}`;
+      const currentDateKey = getJakartaDateComponents().isoDateKey;
 
       const activeSecId = sections[newIndex]?.id;
       const sectionCounts: Record<string, number> = {};
@@ -170,6 +188,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
             activeSectionId: activeSecId,
             counts: newCounts,
             sectionCounts,
+            dateKey: currentDateKey,
             updatedAt: new Date().toISOString(),
           })
         );
@@ -184,9 +203,19 @@ export function ReadingView({ reading }: ReadingViewProps) {
         activeSectionId: activeSecId,
         counts: newCounts,
         sectionCounts,
-      }).catch((err) => {
-        console.error('Background progress save error:', err);
-      });
+        dateKey: currentDateKey,
+      })
+        .then(() => {
+          if (isCompletingRef.current) {
+            deleteReadingProgress(reading.slug).catch(() => {});
+            try {
+              localStorage.removeItem(storageKey);
+            } catch {}
+          }
+        })
+        .catch((err) => {
+          console.error('Background progress save error:', err);
+        });
     },
     [isProgressLoaded, isCompleted, sections, reading.slug]
   );
@@ -228,7 +257,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
     }
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (activeIndex < sections.length - 1) {
       const nextIndex = activeIndex + 1;
       setActiveIndex(nextIndex);
@@ -236,8 +265,8 @@ export function ReadingView({ reading }: ReadingViewProps) {
       scrollToReader();
     } else {
       // Completed reading!
-      setIsCompleted(true);
-      scrollToReader();
+      setCompletionError(null);
+      setIsSubmittingCompletion(true);
 
       const totalCount = counts.reduce((sum, val) => sum + val, 0);
       const totalTarget = sections.reduce(
@@ -245,34 +274,54 @@ export function ReadingView({ reading }: ReadingViewProps) {
         0
       );
 
-      // 1. Record completion history
-      recordReadingCompletion({
-        readingSlug: reading.slug,
-        count: totalCount > 0 ? totalCount : null,
-        target: totalTarget > 0 ? totalTarget : null,
-      })
-        .then((res) => {
-          if (res && !res.success) {
-            console.error('Failed to record reading completion:', res.message);
-          }
-        })
-        .catch((err) => {
-          console.error('Non-blocking persistence error:', err);
+      try {
+        // 1. Record completion history first
+        const res = await recordReadingCompletion({
+          readingSlug: reading.slug,
+          count: totalCount > 0 ? totalCount : null,
+          target: totalTarget > 0 ? totalTarget : null,
         });
 
-      // 2. Clear saved active progress in Supabase and localStorage
-      deleteReadingProgress(reading.slug).catch((err) => {
-        console.error('Failed to delete server progress:', err);
-      });
-      try {
-        localStorage.removeItem(`lembaran_progress_${reading.slug}`);
-      } catch (e) {
-        console.error('Failed to clear local progress:', e);
+        if (!res || !res.success) {
+          setIsSubmittingCompletion(false);
+          setCompletionError(
+            res?.message || 'Gagal menyimpan riwayat penyelesaian. Silakan coba lagi.'
+          );
+          return;
+        }
+
+        // Lock future background saves
+        isCompletingRef.current = true;
+
+        // 2. Clear saved active progress in Supabase and localStorage
+        await deleteReadingProgress(reading.slug).catch((err) => {
+          console.error('Failed to delete server progress:', err);
+        });
+        try {
+          localStorage.removeItem(`lembaran_progress_${reading.slug}`);
+        } catch (e) {
+          console.error('Failed to clear local progress:', e);
+        }
+
+        // 3. Reset React counts and activeIndex state to 0 for next session
+        setCounts(new Array(sections.length).fill(0));
+        setActiveIndex(0);
+        setIsSubmittingCompletion(false);
+        setIsCompleted(true);
+        scrollToReader();
+      } catch (err) {
+        console.error('Error during reading completion:', err);
+        setIsSubmittingCompletion(false);
+        setCompletionError(
+          'Terjadi kesalahan saat menyimpan riwayat. Silakan coba lagi.'
+        );
       }
     }
   };
 
   const handleResetAll = () => {
+    isCompletingRef.current = false;
+    setCompletionError(null);
     const zeroCounts = new Array(sections.length).fill(0);
     setCounts(zeroCounts);
     setActiveIndex(0);
@@ -346,6 +395,19 @@ export function ReadingView({ reading }: ReadingViewProps) {
           )}
         </header>
       </div>
+
+      {completionError && (
+        <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-300 text-sm flex items-center justify-between gap-3">
+          <span>{completionError}</span>
+          <button
+            type="button"
+            onClick={() => setCompletionError(null)}
+            className="text-xs font-semibold underline hover:no-underline cursor-pointer"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
 
       {/* Completion View */}
       {isCompleted ? (
@@ -666,9 +728,9 @@ export function ReadingView({ reading }: ReadingViewProps) {
               <button
                 type="button"
                 onClick={handlePrev}
-                disabled={activeIndex === 0}
+                disabled={activeIndex === 0 || isSubmittingCompletion}
                 className={`flex-1 min-h-[48px] inline-flex items-center justify-center py-3 px-4 rounded-xl text-sm font-semibold transition-all focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 ${
-                  activeIndex === 0
+                  activeIndex === 0 || isSubmittingCompletion
                     ? 'bg-slate-100 dark:bg-slate-800/50 text-slate-300 dark:text-slate-600 cursor-not-allowed border border-slate-200/50 dark:border-slate-800'
                     : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200/80 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-[0.99] touch-manipulation'
                 }`}
@@ -694,28 +756,37 @@ export function ReadingView({ reading }: ReadingViewProps) {
               <button
                 type="button"
                 onClick={handleNext}
-                className="flex-1 min-h-[48px] inline-flex items-center justify-center py-3 px-4 rounded-xl text-sm font-semibold bg-emerald-800 dark:bg-emerald-700 text-white hover:bg-emerald-900 dark:hover:bg-emerald-600 shadow-2xs cursor-pointer active:scale-[0.99] transition-all touch-manipulation focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
+                disabled={isSubmittingCompletion}
+                className="flex-1 min-h-[48px] inline-flex items-center justify-center py-3 px-4 rounded-xl text-sm font-semibold bg-emerald-800 dark:bg-emerald-700 text-white hover:bg-emerald-900 dark:hover:bg-emerald-600 shadow-2xs cursor-pointer active:scale-[0.99] transition-all touch-manipulation focus:outline-hidden focus-visible:ring-2 focus-visible:ring-emerald-600 dark:focus-visible:ring-emerald-400 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 disabled:opacity-60 disabled:cursor-not-allowed"
                 aria-label={
                   activeIndex === sections.length - 1
                     ? 'Selesaikan bacaan'
                     : 'Ke bagian selanjutnya'
                 }
               >
-                <span>{activeIndex === sections.length - 1 ? 'Selesai' : 'Selanjutnya'}</span>
-                <svg
-                  className="w-4 h-4 ml-1.5 shrink-0"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
+                <span>
+                  {isSubmittingCompletion
+                    ? 'Menyimpan...'
+                    : activeIndex === sections.length - 1
+                    ? 'Selesai'
+                    : 'Selanjutnya'}
+                </span>
+                {!isSubmittingCompletion && (
+                  <svg
+                    className="w-4 h-4 ml-1.5 shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
+                )}
               </button>
             </div>
           </nav>

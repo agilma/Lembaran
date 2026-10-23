@@ -1,4 +1,5 @@
 import { ReadingSection } from "@/types/reading";
+import { getJakartaDateComponents } from "@/lib/date-utils";
 
 export interface SavedReadingProgress {
   activeIndex: number;
@@ -6,15 +7,18 @@ export interface SavedReadingProgress {
   counts: number[];
   sectionCounts?: Record<string, number>;
   updatedAt?: string;
+  dateKey?: string;
 }
 
 /**
  * Safely parses and validates arbitrary progress data (from localStorage or Supabase).
  * Supports both section ID mapping (`sectionCounts`, `activeSectionId`) and legacy array index mapping.
+ * Optionally validates that the progress belongs to `currentDateKey` (Asia/Jakarta timezone).
  */
 export function parseProgressData(
   data: unknown,
-  sections: ReadingSection[] | number
+  sections: ReadingSection[] | number,
+  currentDateKey?: string
 ): SavedReadingProgress | null {
   if (!data || typeof data !== "object") return null;
   const obj = data as Record<string, unknown>;
@@ -23,6 +27,26 @@ export function parseProgressData(
   const sectionsCount: number = Array.isArray(sections) ? sections.length : sections;
 
   if (sectionsCount <= 0) return null;
+
+  const updatedAt = typeof obj.updatedAt === "string" ? obj.updatedAt : undefined;
+
+  let progressDateKey =
+    typeof obj.dateKey === "string" && obj.dateKey.trim().length > 0
+      ? obj.dateKey.trim()
+      : undefined;
+
+  if (!progressDateKey && updatedAt) {
+    try {
+      progressDateKey = getJakartaDateComponents(updatedAt).isoDateKey;
+    } catch {
+      // Ignore date parsing error
+    }
+  }
+
+  // If currentDateKey is specified and progress belongs to a different WIB date, discard it
+  if (currentDateKey && progressDateKey && progressDateKey !== currentDateKey) {
+    return null;
+  }
 
   const savedIndex = obj.activeIndex;
   const savedSectionId =
@@ -35,7 +59,6 @@ export function parseProgressData(
     obj.sectionCounts && typeof obj.sectionCounts === "object"
       ? (obj.sectionCounts as Record<string, unknown>)
       : null;
-  const updatedAt = typeof obj.updatedAt === "string" ? obj.updatedAt : undefined;
 
   // Determine activeIndex based on activeSectionId lookup or fallback to savedIndex
   let validIndex = 0;
@@ -106,6 +129,7 @@ export function parseProgressData(
     counts: validCounts,
     ...(hasSectionCounts ? { sectionCounts: normalizedSectionCounts } : {}),
     updatedAt,
+    ...(progressDateKey ? { dateKey: progressDateKey } : {}),
   };
 }
 
@@ -114,33 +138,45 @@ export function parseProgressData(
  * - localStorage remains primary source for fast restore;
  * - if server progress has a strictly newer timestamp, use server progress;
  * - if localStorage is not present, use server progress if available.
+ * Option to filter by currentDateKey (Asia/Jakarta timezone).
  */
 export function resolveReadingProgress(
   localProgress: SavedReadingProgress | null,
-  serverProgress: SavedReadingProgress | null
+  serverProgress: SavedReadingProgress | null,
+  currentDateKey?: string
 ): SavedReadingProgress | null {
-  if (!localProgress && !serverProgress) {
+  const effectiveLocal =
+    localProgress && currentDateKey && localProgress.dateKey && localProgress.dateKey !== currentDateKey
+      ? null
+      : localProgress;
+
+  const effectiveServer =
+    serverProgress && currentDateKey && serverProgress.dateKey && serverProgress.dateKey !== currentDateKey
+      ? null
+      : serverProgress;
+
+  if (!effectiveLocal && !effectiveServer) {
     return null;
   }
 
-  if (localProgress && !serverProgress) {
-    return localProgress;
+  if (effectiveLocal && !effectiveServer) {
+    return effectiveLocal;
   }
 
-  if (!localProgress && serverProgress) {
-    return serverProgress;
+  if (!effectiveLocal && effectiveServer) {
+    return effectiveServer;
   }
 
   // Both localProgress and serverProgress exist
-  if (localProgress && serverProgress) {
-    const localTime = localProgress.updatedAt ? new Date(localProgress.updatedAt).getTime() : 0;
-    const serverTime = serverProgress.updatedAt ? new Date(serverProgress.updatedAt).getTime() : 0;
+  if (effectiveLocal && effectiveServer) {
+    const localTime = effectiveLocal.updatedAt ? new Date(effectiveLocal.updatedAt).getTime() : 0;
+    const serverTime = effectiveServer.updatedAt ? new Date(effectiveServer.updatedAt).getTime() : 0;
 
     if (!isNaN(serverTime) && serverTime > (isNaN(localTime) ? 0 : localTime)) {
-      return serverProgress;
+      return effectiveServer;
     }
 
-    return localProgress;
+    return effectiveLocal;
   }
 
   return null;

@@ -3,7 +3,7 @@
 import { getCurrentUser } from "@/lib/auth-utils";
 import { createClient } from "@/lib/supabase/server";
 import { readingsData } from "@/data/readings";
-import { formatInJakartaTimezone } from "@/lib/date-utils";
+import { formatInJakartaTimezone, getJakartaDateComponents } from "@/lib/date-utils";
 
 export interface RecordCompletionParams {
   readingSlug: string;
@@ -22,6 +22,7 @@ export interface ReadingProgressData {
   activeSectionId?: string;
   counts: number[];
   sectionCounts?: Record<string, number>;
+  dateKey?: string;
   updatedAt?: string;
 }
 
@@ -37,6 +38,7 @@ export interface SaveProgressParams {
   activeSectionId?: string;
   counts: number[];
   sectionCounts?: Record<string, number>;
+  dateKey?: string;
 }
 
 export interface SaveProgressResult {
@@ -187,6 +189,7 @@ export async function getReadingProgress(
     let parsedCounts: number[] = [];
     let parsedSectionCounts: Record<string, number> | undefined = undefined;
     let parsedActiveSectionId: string | undefined = undefined;
+    let parsedDateKey: string | undefined = undefined;
 
     if (Array.isArray(data.counts)) {
       parsedCounts = data.counts;
@@ -201,6 +204,9 @@ export async function getReadingProgress(
       if (typeof obj.activeSectionId === "string") {
         parsedActiveSectionId = obj.activeSectionId;
       }
+      if (typeof obj.dateKey === "string") {
+        parsedDateKey = obj.dateKey;
+      }
     }
 
     return {
@@ -210,6 +216,7 @@ export async function getReadingProgress(
         activeSectionId: parsedActiveSectionId,
         counts: parsedCounts,
         sectionCounts: parsedSectionCounts,
+        dateKey: parsedDateKey,
         updatedAt: data.updated_at,
       },
     };
@@ -246,15 +253,14 @@ export async function saveReadingProgress(
     }
 
     const updatedAt = new Date().toISOString();
+    const currentDateKey = params.dateKey || getJakartaDateComponents().isoDateKey;
 
-    const countsPayload =
-      params.sectionCounts || params.activeSectionId
-        ? {
-            counts: params.counts,
-            sectionCounts: params.sectionCounts,
-            activeSectionId: params.activeSectionId,
-          }
-        : params.counts;
+    const countsPayload = {
+      counts: params.counts,
+      sectionCounts: params.sectionCounts,
+      activeSectionId: params.activeSectionId,
+      dateKey: currentDateKey,
+    };
 
     const { error } = await supabase.from("reading_progress").upsert(
       {
