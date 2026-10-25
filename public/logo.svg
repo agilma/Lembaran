@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="104 114 304 304">
+  <rect x="0" y="0" width="512" height="512" fill="#0f172a"/>
+  <!-- open book, kept inside maskable safe zone -->
+  <path d="M256 190 C220 160 170 152 124 160 L124 346 C170 338 220 346 256 374 Z" fill="#faf9f6"/>
+  <path d="M256 190 C292 160 342 152 388 160 L388 346 C342 338 292 346 256 374 Z" fill="#e7e2d6"/>
+  <path d="M256 190 L256 374" stroke="#0f172a" stroke-width="6"/>
+  <g stroke="#94a3b8" stroke-width="7" stroke-linecap="round" fill="none">
+    <path d="M154 208 C182 204 208 208 228 220"/>
+    <path d="M154 240 C182 236 208 240 228 252"/>
+    <path d="M154 272 C182 268 208 272 228 284"/>
+    <path d="M284 220 C296 212 308 208 322 207" stroke="#a8a294"/>
+    <path d="M284 252 C296 244 308 240 322 239" stroke="#a8a294"/>
+  </g>
+  <!-- gold bookmark ribbon -->
+  <path d="M346 158 L378 160 L378 262 L362 246 L346 262 Z" fill="#f59e0b"/>
+</svg>
