@@ -10,9 +10,14 @@ export default async function Header() {
     <header className="sticky top-0 z-10 backdrop-blur-md bg-[#faf9f6]/80 dark:bg-[#0b0f17]/80 border-b border-slate-200/70 dark:border-slate-800/80 transition-colors">
       <div className="max-w-3xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         <Link href="/" className="group flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-emerald-800 dark:bg-emerald-700 text-amber-100 flex items-center justify-center font-serif text-lg font-bold shadow-xs group-hover:bg-emerald-900 dark:group-hover:bg-emerald-600 transition-colors">
-            L
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo.svg"
+            alt=""
+            width={32}
+            height={32}
+            className="w-8 h-8 rounded-lg shadow-xs group-hover:opacity-90 transition-opacity"
+          />
           <span className="font-semibold text-lg tracking-tight text-slate-900 dark:text-slate-100">
             Lembaran
           </span>
