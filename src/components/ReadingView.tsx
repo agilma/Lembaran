@@ -14,13 +14,21 @@ import {
   parseProgressData,
   resolveReadingProgress,
 } from '@/lib/reading-progress';
-import { getJakartaDateComponents } from '@/lib/date-utils';
 
 interface ReadingViewProps {
   reading: Reading;
 }
 
 const TRANSLATION_CHAR_LIMIT = 180;
+const SERVER_SAVE_DEBOUNCE_MS = 600;
+
+interface PendingServerSave {
+  activeIndex: number;
+  activeSectionId?: string;
+  counts: number[];
+  sectionCounts: Record<string, number>;
+  updatedAt: string;
+}
 
 export function ReadingView({ reading }: ReadingViewProps) {
   const sections = reading.sections || [];
@@ -35,6 +43,13 @@ export function ReadingView({ reading }: ReadingViewProps) {
   const [isProgressLoaded, setIsProgressLoaded] = useState<boolean>(false);
   const readerRef = useRef<HTMLDivElement>(null);
   const isCompletingRef = useRef<boolean>(false);
+  // `reading` can get a new identity when Next re-renders the route (e.g. after a server action),
+  // so effects read sections through a ref instead of depending on the array reference.
+  const sectionsRef = useRef(sections);
+  sectionsRef.current = sections;
+  const pendingSaveRef = useRef<PendingServerSave | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPersistedRef = useRef<string>('');
 
   const scrollToReader = useCallback(() => {
     if (readerRef.current) {
@@ -42,14 +57,37 @@ export function ReadingView({ reading }: ReadingViewProps) {
     }
   }, []);
 
-  // Load initial saved progress from server (Supabase) or guest fallback (localStorage)
+  const flushServerSave = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const pending = pendingSaveRef.current;
+    pendingSaveRef.current = null;
+    if (!pending || isCompletingRef.current) return;
+
+    saveReadingProgress({ readingSlug: reading.slug, ...pending }).catch((err) => {
+      console.error('Background progress save error:', err);
+    });
+  }, [reading.slug]);
+
+  const cancelServerSave = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+  }, []);
+
+  // Load initial saved progress from server (Supabase) or guest fallback (localStorage).
+  // Runs once per reading; progress is only cleared by finishing the reading ("Selesai").
   useEffect(() => {
     let isSubscribed = true;
+    const loadSections = sectionsRef.current;
 
     async function loadProgress() {
       setIsProgressLoaded(false);
 
-      if (sections.length === 0) {
+      if (loadSections.length === 0) {
         if (isSubscribed) {
           setIsProgressLoaded(true);
         }
@@ -57,15 +95,13 @@ export function ReadingView({ reading }: ReadingViewProps) {
       }
 
       const storageKey = `lembaran_progress_${reading.slug}`;
-      const currentDateKey = getJakartaDateComponents().isoDateKey;
 
       // 1. Read progress from localStorage
       let localProgress: SavedReadingProgress | null = null;
       try {
         const localDataString = localStorage.getItem(storageKey);
         if (localDataString) {
-          const parsed = JSON.parse(localDataString);
-          localProgress = parseProgressData(parsed, sections, currentDateKey);
+          localProgress = parseProgressData(JSON.parse(localDataString), loadSections);
         }
       } catch (e) {
         console.error('Failed to read or parse local reading progress:', e);
@@ -76,7 +112,7 @@ export function ReadingView({ reading }: ReadingViewProps) {
       try {
         const res = await getReadingProgress(reading.slug);
         if (res.success && res.data) {
-          serverProgress = parseProgressData(res.data, sections, currentDateKey);
+          serverProgress = parseProgressData(res.data, loadSections);
         }
       } catch (err) {
         console.error('Error fetching server reading progress:', err);
@@ -85,15 +121,18 @@ export function ReadingView({ reading }: ReadingViewProps) {
       if (!isSubscribed) return;
 
       // 3. Determine which progress to use
-      const chosenProgress = resolveReadingProgress(localProgress, serverProgress, currentDateKey);
+      const chosenProgress = resolveReadingProgress(localProgress, serverProgress);
 
       // 4. Set activeIndex and counts
       if (chosenProgress) {
+        lastPersistedRef.current = JSON.stringify([chosenProgress.activeIndex, chosenProgress.counts]);
         setActiveIndex(chosenProgress.activeIndex);
         setCounts(chosenProgress.counts);
       } else {
+        const zeroCounts = new Array(loadSections.length).fill(0);
+        lastPersistedRef.current = JSON.stringify([0, zeroCounts]);
         setActiveIndex(0);
-        setCounts(new Array(sections.length).fill(0));
+        setCounts(zeroCounts);
       }
 
       // 5. Mark hydration complete
@@ -105,19 +144,22 @@ export function ReadingView({ reading }: ReadingViewProps) {
     return () => {
       isSubscribed = false;
     };
-  }, [reading.slug, sections]);
+  }, [reading.slug]);
 
   // Reset translation collapse state whenever section changes
   useEffect(() => {
     setIsTranslationExpanded(false);
   }, [activeIndex]);
 
-  // Auto-save progress on activeIndex or counts update whenever state changes after hydration
+  // Persist progress whenever activeIndex or counts change after hydration:
+  // localStorage immediately, server debounced (with the client timestamp so a stale
+  // server copy can never look newer than what the user last did on this device).
   useEffect(() => {
     if (!isProgressLoaded || isCompleted || isCompletingRef.current || sections.length === 0) return;
 
-    const storageKey = `lembaran_progress_${reading.slug}`;
-    const currentDateKey = getJakartaDateComponents().isoDateKey;
+    const snapshot = JSON.stringify([activeIndex, counts]);
+    if (snapshot === lastPersistedRef.current) return;
+    lastPersistedRef.current = snapshot;
 
     const activeSecId = sections[activeIndex]?.id;
     const sectionCounts: Record<string, number> = {};
@@ -126,99 +168,47 @@ export function ReadingView({ reading }: ReadingViewProps) {
         sectionCounts[sec.id] = counts[idx] || 0;
       }
     });
+    const updatedAt = new Date().toISOString();
 
     try {
       localStorage.setItem(
-        storageKey,
+        `lembaran_progress_${reading.slug}`,
         JSON.stringify({
           activeIndex,
           activeSectionId: activeSecId,
           counts,
           sectionCounts,
-          dateKey: currentDateKey,
-          updatedAt: new Date().toISOString(),
+          updatedAt,
         })
       );
     } catch (e) {
       console.error('Failed to write to localStorage:', e);
     }
 
-    saveReadingProgress({
-      readingSlug: reading.slug,
+    pendingSaveRef.current = {
       activeIndex,
       activeSectionId: activeSecId,
       counts,
       sectionCounts,
-      dateKey: currentDateKey,
-    })
-      .then(() => {
-        if (isCompletingRef.current) {
-          deleteReadingProgress(reading.slug).catch(() => {});
-          try {
-            localStorage.removeItem(storageKey);
-          } catch {}
-        }
-      })
-      .catch((err) => {
-        console.error('Background progress save error:', err);
-      });
-  }, [activeIndex, counts, isProgressLoaded, isCompleted, reading.slug, sections]);
+      updatedAt,
+    };
+    cancelServerSave();
+    saveTimerRef.current = setTimeout(flushServerSave, SERVER_SAVE_DEBOUNCE_MS);
+  }, [activeIndex, counts, isProgressLoaded, isCompleted, reading.slug, sections, cancelServerSave, flushServerSave]);
 
-  const persistProgress = useCallback(
-    (newIndex: number, newCounts: number[]) => {
-      if (!isProgressLoaded || isCompleted || isCompletingRef.current || sections.length === 0) return;
-
-      const storageKey = `lembaran_progress_${reading.slug}`;
-      const currentDateKey = getJakartaDateComponents().isoDateKey;
-
-      const activeSecId = sections[newIndex]?.id;
-      const sectionCounts: Record<string, number> = {};
-      sections.forEach((sec, idx) => {
-        if (sec.id) {
-          sectionCounts[sec.id] = newCounts[idx] || 0;
-        }
-      });
-
-      // Save locally (for guest and fast local state)
-      try {
-        localStorage.setItem(
-          storageKey,
-          JSON.stringify({
-            activeIndex: newIndex,
-            activeSectionId: activeSecId,
-            counts: newCounts,
-            sectionCounts,
-            dateKey: currentDateKey,
-            updatedAt: new Date().toISOString(),
-          })
-        );
-      } catch (e) {
-        console.error('Failed to write to localStorage:', e);
-      }
-
-      // Save to Supabase (background fire-and-forget for logged-in user)
-      saveReadingProgress({
-        readingSlug: reading.slug,
-        activeIndex: newIndex,
-        activeSectionId: activeSecId,
-        counts: newCounts,
-        sectionCounts,
-        dateKey: currentDateKey,
-      })
-        .then(() => {
-          if (isCompletingRef.current) {
-            deleteReadingProgress(reading.slug).catch(() => {});
-            try {
-              localStorage.removeItem(storageKey);
-            } catch {}
-          }
-        })
-        .catch((err) => {
-          console.error('Background progress save error:', err);
-        });
-    },
-    [isProgressLoaded, isCompleted, sections, reading.slug]
-  );
+  // Don't lose the last taps when the tab is hidden, refreshed or navigated away
+  useEffect(() => {
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') flushServerSave();
+    };
+    document.addEventListener('visibilitychange', onHidden);
+    window.addEventListener('pagehide', flushServerSave);
+    return () => {
+      document.removeEventListener('visibilitychange', onHidden);
+      window.removeEventListener('pagehide', flushServerSave);
+      flushServerSave();
+    };
+  }, [flushServerSave]);
 
   const currentSection = sections[activeIndex];
   const hasCounter =
@@ -238,21 +228,18 @@ export function ReadingView({ reading }: ReadingViewProps) {
     const updatedCounts = [...counts];
     updatedCounts[activeIndex] = (updatedCounts[activeIndex] || 0) + 1;
     setCounts(updatedCounts);
-    persistProgress(activeIndex, updatedCounts);
   };
 
   const handleResetSection = () => {
     const updatedCounts = [...counts];
     updatedCounts[activeIndex] = 0;
     setCounts(updatedCounts);
-    persistProgress(activeIndex, updatedCounts);
   };
 
   const handlePrev = () => {
     if (activeIndex > 0) {
       const nextIndex = activeIndex - 1;
       setActiveIndex(nextIndex);
-      persistProgress(nextIndex, counts);
       scrollToReader();
     }
   };
@@ -261,7 +248,6 @@ export function ReadingView({ reading }: ReadingViewProps) {
     if (activeIndex < sections.length - 1) {
       const nextIndex = activeIndex + 1;
       setActiveIndex(nextIndex);
-      persistProgress(nextIndex, counts);
       scrollToReader();
     } else {
       // Completed reading!
@@ -274,8 +260,12 @@ export function ReadingView({ reading }: ReadingViewProps) {
         0
       );
 
+      // Block (and drop) pending progress saves so none can land after the completion
+      isCompletingRef.current = true;
+      cancelServerSave();
+
       try {
-        // 1. Record completion history first
+        // The server action records the completion and clears the saved progress in one round trip
         const res = await recordReadingCompletion({
           readingSlug: reading.slug,
           count: totalCount > 0 ? totalCount : null,
@@ -283,6 +273,8 @@ export function ReadingView({ reading }: ReadingViewProps) {
         });
 
         if (!res || !res.success) {
+          isCompletingRef.current = false;
+          flushServerSave();
           setIsSubmittingCompletion(false);
           setCompletionError(
             res?.message || 'Gagal menyimpan riwayat penyelesaian. Silakan coba lagi.'
@@ -290,20 +282,14 @@ export function ReadingView({ reading }: ReadingViewProps) {
           return;
         }
 
-        // Lock future background saves
-        isCompletingRef.current = true;
-
-        // 2. Clear saved active progress in Supabase and localStorage
-        await deleteReadingProgress(reading.slug).catch((err) => {
-          console.error('Failed to delete server progress:', err);
-        });
+        pendingSaveRef.current = null;
         try {
           localStorage.removeItem(`lembaran_progress_${reading.slug}`);
         } catch (e) {
           console.error('Failed to clear local progress:', e);
         }
 
-        // 3. Reset React counts and activeIndex state to 0 for next session
+        // Reset React counts and activeIndex state to 0 for next session
         setCounts(new Array(sections.length).fill(0));
         setActiveIndex(0);
         setIsSubmittingCompletion(false);
@@ -311,6 +297,8 @@ export function ReadingView({ reading }: ReadingViewProps) {
         scrollToReader();
       } catch (err) {
         console.error('Error during reading completion:', err);
+        isCompletingRef.current = false;
+        flushServerSave();
         setIsSubmittingCompletion(false);
         setCompletionError(
           'Terjadi kesalahan saat menyimpan riwayat. Silakan coba lagi.'
@@ -321,8 +309,11 @@ export function ReadingView({ reading }: ReadingViewProps) {
 
   const handleResetAll = () => {
     isCompletingRef.current = false;
+    pendingSaveRef.current = null;
+    cancelServerSave();
     setCompletionError(null);
     const zeroCounts = new Array(sections.length).fill(0);
+    lastPersistedRef.current = JSON.stringify([0, zeroCounts]);
     setCounts(zeroCounts);
     setActiveIndex(0);
     setIsCompleted(false);
@@ -489,7 +480,6 @@ export function ReadingView({ reading }: ReadingViewProps) {
                       type="button"
                       onClick={() => {
                         setActiveIndex(idx);
-                        persistProgress(idx, counts);
                         scrollToReader();
                       }}
                       aria-current={isCurrent ? 'step' : undefined}

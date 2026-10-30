@@ -52,13 +52,13 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
         addAll: async () => {},
         put: async (request: unknown, response: unknown) => {
           const url = typeof request === 'string' ? request : (request as { url: string }).url;
-          cachePuts.push({ cacheName: 'lembaran-cache-v2', requestUrl: url, response });
+          cachePuts.push({ cacheName: 'lembaran-cache-v3', requestUrl: url, response });
         },
         match: async () => null,
       };
 
       const mockCaches = {
-        keys: async () => ['lembaran-cache-v0', 'lembaran-cache-v1', 'other-app-cache', 'lembaran-cache-v2'],
+        keys: async () => ['lembaran-cache-v0', 'lembaran-cache-v1', 'lembaran-cache-v2', 'other-app-cache', 'lembaran-cache-v3'],
         open: async (name: string) => mockCache,
         delete: async (name: string) => {
           deletedCaches.push(name);
@@ -314,7 +314,7 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
       }
     });
 
-    test('activation cleanup deletes old Lembaran caches (lembaran-cache-v0, lembaran-cache-v1) and preserves other app caches', async () => {
+    test('activation cleanup deletes old Lembaran caches (lembaran-cache-v0, v1, v2) and preserves other app caches', async () => {
       const swEnv = createSWEnvironment();
       const activateListener = swEnv.listeners.activate[0];
 
@@ -330,8 +330,8 @@ describe('PWA & Service Worker Implementation & Lifecycle Suite', () => {
 
       assert.deepStrictEqual(
         swEnv.deletedCaches,
-        ['lembaran-cache-v0', 'lembaran-cache-v1'],
-        'Old lembaran-cache-* versions must be deleted while preserving other-app-cache and lembaran-cache-v2'
+        ['lembaran-cache-v0', 'lembaran-cache-v1', 'lembaran-cache-v2'],
+        'Old lembaran-cache-* versions must be deleted while preserving other-app-cache and lembaran-cache-v3'
       );
     });
   });

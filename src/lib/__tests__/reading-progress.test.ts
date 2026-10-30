@@ -22,7 +22,6 @@ describe('Reading Progress Resolution & Persistence Suite', () => {
         activeIndex: 1,
         counts: [2, 1, 0],
         updatedAt: '2026-03-30T10:00:00.000Z',
-        dateKey: '2026-03-30',
       });
     });
 
@@ -111,33 +110,46 @@ describe('Reading Progress Resolution & Persistence Suite', () => {
   });
 
   describe('Daily WIB Session & Date Rollover Regression Tests', () => {
-    test('Progres belum selesai dari tanggal WIB sebelumnya di-reset ke 0 untuk hari baru', () => {
-      const yesterdayProgress: SavedReadingProgress = {
+    test('Progres belum selesai tetap ada setelah lewat tengah malam WIB (tidak di-reset karena tanggal)', () => {
+      const yesterdayProgress = {
         activeIndex: 1,
         counts: [10, 5, 0],
         dateKey: '2026-10-19',
-        updatedAt: '2026-10-19T23:00:00.000Z',
+        updatedAt: '2026-10-19T16:59:00.000Z',
       };
 
-      const todayDateKey = '2026-10-20';
+      const parsed = parseProgressData(yesterdayProgress, sectionsCount);
+      assert.deepStrictEqual(parsed?.counts, [10, 5, 0]);
+      assert.strictEqual(parsed?.activeIndex, 1);
 
-      const parsedYesterday = parseProgressData(
-        yesterdayProgress,
-        sectionsCount,
-        todayDateKey
-      );
-      assert.strictEqual(parsedYesterday, null);
+      const resolved = resolveReadingProgress(parsed, null);
+      assert.deepStrictEqual(resolved?.counts, [10, 5, 0]);
+    });
 
-      const resolved = resolveReadingProgress(
-        yesterdayProgress,
-        null,
-        todayDateKey
+    test('Progres dari server tanggal sebelumnya tetap dipulihkan bila tidak ada localStorage', () => {
+      const serverProgress = parseProgressData(
+        { activeIndex: 2, counts: [3, 3, 7], updatedAt: '2026-10-19T10:00:00.000Z' },
+        sectionsCount
       );
-      assert.strictEqual(resolved, null);
+      assert.deepStrictEqual(resolveReadingProgress(null, serverProgress), serverProgress);
+    });
+
+    test('Simpan terlambat dari server (hitungan lama) tidak menimpa hitungan lokal yang lebih baru', () => {
+      // Lokal: 18 pada 10:00:05 (waktu klik). Server baru menerima simpan lama (15) pada 10:00:09,
+      // tetapi stempel waktunya tetap waktu klik perangkat (10:00:02).
+      const local = parseProgressData(
+        { activeIndex: 0, counts: [18, 0, 0], updatedAt: '2026-10-20T03:00:05.000Z' },
+        sectionsCount
+      );
+      const server = parseProgressData(
+        { activeIndex: 0, counts: [15, 0, 0], updatedAt: '2026-10-20T03:00:02.000Z' },
+        sectionsCount
+      );
+
+      assert.deepStrictEqual(resolveReadingProgress(local, server)?.counts, [18, 0, 0]);
     });
 
     test('Selesai pukul 01:00 WIB lalu memulai sesi baru pada tanggal yang sama menghasilkan state 0', () => {
-      const currentDateKey = '2026-10-20';
       const storageKey = 'lembaran_progress_al-fatihah';
       const mockStorage = new Map<string, string>();
 
@@ -156,10 +168,10 @@ describe('Reading Progress Resolution & Persistence Suite', () => {
 
       const localDataString = mockStorage.get(storageKey);
       const localProgress = localDataString
-        ? parseProgressData(JSON.parse(localDataString), sectionsCount, currentDateKey)
+        ? parseProgressData(JSON.parse(localDataString), sectionsCount)
         : null;
 
-      const resolved = resolveReadingProgress(localProgress, null, currentDateKey);
+      const resolved = resolveReadingProgress(localProgress, null);
       assert.strictEqual(resolved, null, 'Next session on same date must start fresh with null progress');
     });
 
@@ -171,7 +183,7 @@ describe('Reading Progress Resolution & Persistence Suite', () => {
 
       const rawLocal = mockStorage.get(`lembaran_progress_${slug}`);
       assert.strictEqual(rawLocal, undefined);
-      const parsed = parseProgressData(rawLocal, sectionsCount, '2026-10-20');
+      const parsed = parseProgressData(rawLocal, sectionsCount);
       assert.strictEqual(parsed, null);
     });
 
