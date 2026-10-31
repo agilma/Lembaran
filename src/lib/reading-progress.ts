@@ -1,5 +1,4 @@
 import { ReadingSection } from "@/types/reading";
-import { getJakartaDateComponents } from "@/lib/date-utils";
 
 export interface SavedReadingProgress {
   activeIndex: number;
@@ -7,18 +6,16 @@ export interface SavedReadingProgress {
   counts: number[];
   sectionCounts?: Record<string, number>;
   updatedAt?: string;
-  dateKey?: string;
 }
 
 /**
  * Safely parses and validates arbitrary progress data (from localStorage or Supabase).
  * Supports both section ID mapping (`sectionCounts`, `activeSectionId`) and legacy array index mapping.
- * Optionally validates that the progress belongs to `currentDateKey` (Asia/Jakarta timezone).
+ * Progress never expires by date: it stays until the reading is finished.
  */
 export function parseProgressData(
   data: unknown,
-  sections: ReadingSection[] | number,
-  currentDateKey?: string
+  sections: ReadingSection[] | number
 ): SavedReadingProgress | null {
   if (!data || typeof data !== "object") return null;
   const obj = data as Record<string, unknown>;
@@ -29,24 +26,6 @@ export function parseProgressData(
   if (sectionsCount <= 0) return null;
 
   const updatedAt = typeof obj.updatedAt === "string" ? obj.updatedAt : undefined;
-
-  let progressDateKey =
-    typeof obj.dateKey === "string" && obj.dateKey.trim().length > 0
-      ? obj.dateKey.trim()
-      : undefined;
-
-  if (!progressDateKey && updatedAt) {
-    try {
-      progressDateKey = getJakartaDateComponents(updatedAt).isoDateKey;
-    } catch {
-      // Ignore date parsing error
-    }
-  }
-
-  // If currentDateKey is specified and progress belongs to a different WIB date, discard it
-  if (currentDateKey && progressDateKey && progressDateKey !== currentDateKey) {
-    return null;
-  }
 
   const savedIndex = obj.activeIndex;
   const savedSectionId =
@@ -129,7 +108,6 @@ export function parseProgressData(
     counts: validCounts,
     ...(hasSectionCounts ? { sectionCounts: normalizedSectionCounts } : {}),
     updatedAt,
-    ...(progressDateKey ? { dateKey: progressDateKey } : {}),
   };
 }
 
@@ -138,22 +116,15 @@ export function parseProgressData(
  * - localStorage remains primary source for fast restore;
  * - if server progress has a strictly newer timestamp, use server progress;
  * - if localStorage is not present, use server progress if available.
- * Option to filter by currentDateKey (Asia/Jakarta timezone).
+ * Timestamps are the device's own time of the last change, so a stale server copy
+ * that merely arrived later cannot override newer local progress.
  */
 export function resolveReadingProgress(
   localProgress: SavedReadingProgress | null,
-  serverProgress: SavedReadingProgress | null,
-  currentDateKey?: string
+  serverProgress: SavedReadingProgress | null
 ): SavedReadingProgress | null {
-  const effectiveLocal =
-    localProgress && currentDateKey && localProgress.dateKey && localProgress.dateKey !== currentDateKey
-      ? null
-      : localProgress;
-
-  const effectiveServer =
-    serverProgress && currentDateKey && serverProgress.dateKey && serverProgress.dateKey !== currentDateKey
-      ? null
-      : serverProgress;
+  const effectiveLocal = localProgress;
+  const effectiveServer = serverProgress;
 
   if (!effectiveLocal && !effectiveServer) {
     return null;

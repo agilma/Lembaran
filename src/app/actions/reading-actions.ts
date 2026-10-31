@@ -3,7 +3,7 @@
 import { getCurrentUser } from "@/lib/auth-utils";
 import { createClient } from "@/lib/supabase/server";
 import { readingsData } from "@/data/readings";
-import { formatInJakartaTimezone, getJakartaDateComponents } from "@/lib/date-utils";
+import { formatInJakartaTimezone } from "@/lib/date-utils";
 
 export interface RecordCompletionParams {
   readingSlug: string;
@@ -22,7 +22,6 @@ export interface ReadingProgressData {
   activeSectionId?: string;
   counts: number[];
   sectionCounts?: Record<string, number>;
-  dateKey?: string;
   updatedAt?: string;
 }
 
@@ -38,7 +37,8 @@ export interface SaveProgressParams {
   activeSectionId?: string;
   counts: number[];
   sectionCounts?: Record<string, number>;
-  dateKey?: string;
+  /** When the user made this change on their device (ISO). Used to decide which copy is newest. */
+  updatedAt?: string;
 }
 
 export interface SaveProgressResult {
@@ -135,6 +135,22 @@ export async function recordReadingCompletion(
       };
     }
 
+    // Finishing a reading is the only thing that clears saved progress; do it in the same
+    // round trip. A failure here must not fail the completion that was already recorded.
+    const { error: clearError } = await supabase
+      .from("reading_progress")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("reading_slug", params.readingSlug);
+
+    if (clearError) {
+      console.error("Failed to clear reading progress after completion:", {
+        code: clearError.code,
+        message: clearError.message,
+        userId: maskUserId(user.id),
+      });
+    }
+
     return {
       success: true,
       message: "Berhasil menyimpan riwayat penyelesaian bacaan.",
@@ -189,7 +205,7 @@ export async function getReadingProgress(
     let parsedCounts: number[] = [];
     let parsedSectionCounts: Record<string, number> | undefined = undefined;
     let parsedActiveSectionId: string | undefined = undefined;
-    let parsedDateKey: string | undefined = undefined;
+    let parsedClientUpdatedAt: string | undefined = undefined;
 
     if (Array.isArray(data.counts)) {
       parsedCounts = data.counts;
@@ -204,8 +220,8 @@ export async function getReadingProgress(
       if (typeof obj.activeSectionId === "string") {
         parsedActiveSectionId = obj.activeSectionId;
       }
-      if (typeof obj.dateKey === "string") {
-        parsedDateKey = obj.dateKey;
+      if (typeof obj.clientUpdatedAt === "string") {
+        parsedClientUpdatedAt = obj.clientUpdatedAt;
       }
     }
 
@@ -216,8 +232,7 @@ export async function getReadingProgress(
         activeSectionId: parsedActiveSectionId,
         counts: parsedCounts,
         sectionCounts: parsedSectionCounts,
-        dateKey: parsedDateKey,
-        updatedAt: data.updated_at,
+        updatedAt: parsedClientUpdatedAt ?? data.updated_at,
       },
     };
   } catch (err: unknown) {
@@ -253,13 +268,20 @@ export async function saveReadingProgress(
     }
 
     const updatedAt = new Date().toISOString();
-    const currentDateKey = params.dateKey || getJakartaDateComponents().isoDateKey;
+
+    // Keep the device's own timestamp so a late-arriving save is never mistaken for newer progress.
+    // Ignore missing, invalid or far-future values (bad device clock).
+    const clientTime = params.updatedAt ? new Date(params.updatedAt).getTime() : NaN;
+    const clientUpdatedAt =
+      !isNaN(clientTime) && clientTime <= Date.now() + 5 * 60 * 1000
+        ? new Date(clientTime).toISOString()
+        : updatedAt;
 
     const countsPayload = {
       counts: params.counts,
       sectionCounts: params.sectionCounts,
       activeSectionId: params.activeSectionId,
-      dateKey: currentDateKey,
+      clientUpdatedAt,
     };
 
     const { error } = await supabase.from("reading_progress").upsert(
